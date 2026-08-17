@@ -376,14 +376,14 @@ interface SlipResponse {
 
 const OPERATOR_NAMES: Record<string, string> = {
   paddypower: "Paddy Power", skybet: "Sky Bet", betfair_sb_uk: "Betfair", betfair_ex_uk: "Betfair Exchange",
-  pokerstars: "PokerStars", fanduel: "FanDuel", draftkings: "DraftKings", sisal: "Sisal", snai: "SNAI",
+  fanduel: "FanDuel", draftkings: "DraftKings", codere_it: "Codere", unibet_it: "Unibet",
   betfair_ex_eu: "Betfair Exchange", williamhill: "William Hill", coral: "Coral", "ladbrokes_uk": "Ladbrokes", betvictor: "BetVictor",
 };
 
 const REGION_BOOKMAKERS: Record<string, { regions: string; bookmakers: string[] }> = {
   uk: { regions: "uk", bookmakers: ["paddypower", "skybet", "betfair_sb_uk", "betfair_ex_uk", "williamhill", "coral", "ladbrokes_uk", "betvictor"] },
   us: { regions: "us", bookmakers: ["fanduel", "draftkings"] },
-  it: { regions: "eu", bookmakers: ["sisal", "snai", "pokerstars", "betfair_sb_uk", "betfair_ex_eu"] },
+  it: { regions: "eu", bookmakers: ["codere_it", "unibet_it", "betfair_ex_eu"] },
 };
 
 const UNLISTED_NOTICE = "System Notice: Live odds for this specific matchup are currently unlisted or undergoing line updates by licensed operators. Please try selecting another active fixture.";
@@ -407,9 +407,6 @@ function buildDeepLink(operatorKey: string, eventId: string, sportKey: string, r
     case "betfair_ex_uk": return `https://www.betfair.com/exchange/plus/${sportPath}/event?eventId=${encodedEventId}`;
     case "fanduel": return `https://sportsbook.fanduel.com/navigation/${sportPath}?event=${encodedEventId}`;
     case "draftkings": return `https://sportsbook.draftkings.com/sitesearch?search=${encodedEventId}`;
-    case "sisal": return `https://www.sisal.it/scommesse-matchpoint/search?q=${encodedEventId}`;
-    case "snai": return `https://www.snai.it/sport/search?q=${encodedEventId}`;
-    case "pokerstars": return `https://www.pokerstars.it/sports/search?q=${encodedEventId}`;
     case "betfair_ex_eu": return `https://www.betfair.it/exchange/plus/${sportPath}/event?eventId=${encodedEventId}`;
     case "williamhill": return `https://www.williamhill.com/${sportPath}?eventId=${encodedEventId}`;
     case "coral": return `https://www.coral.co.uk/${sportPath}?eventId=${encodedEventId}`;
@@ -567,6 +564,29 @@ const MARKET_LABEL_TO_API_KEYS: Record<string, string[]> = {
 };
 
 function resolveMarketApiKeys(marketLabel: string): string[] { return MARKET_LABEL_TO_API_KEYS[marketLabel] ?? []; }
+
+const FEATURED_MARKET_KEYS = new Set(["h2h", "spreads", "totals", "outrights"]);
+
+function getRequestedMarketKeys(requestedLegs: RequestedLeg[], selectedMarket?: string): string[] {
+  const keys = selectedMarket
+    ? [selectedMarket]
+    : requestedLegs.flatMap((leg) => leg.marketApiKey ? [leg.marketApiKey] : resolveMarketApiKeys(leg.market));
+  return [...new Set(keys.filter((key): key is string => Boolean(key)))];
+}
+
+function eventHasMarket(event: OddsApiEventOdds, marketKey: string): boolean {
+  return (event.bookmakers ?? []).some((bookmaker) =>
+    (bookmaker.markets ?? []).some((market) => market.key === marketKey)
+  );
+}
+
+function getEventEndpointMarkets(event: OddsApiEventOdds, requestedMarketKeys: string[]): string[] {
+  const nonFeatured = requestedMarketKeys.filter((marketKey) => !FEATURED_MARKET_KEYS.has(marketKey));
+  const missingFeatured = requestedMarketKeys.filter((marketKey) =>
+    FEATURED_MARKET_KEYS.has(marketKey) && !eventHasMarket(event, marketKey)
+  );
+  return [...new Set([...nonFeatured, ...missingFeatured])];
+}
 
 function parseRequestedLegs(text: string, event: OddsApiEventOdds): RequestedLeg[] {
   const legs: RequestedLeg[] = [];
@@ -772,57 +792,6 @@ async function fetchAndFindCandidates(text: string, region: string, bookmakers: 
   return candidates;
 }
 
-function getMarketBatches(sportKey: string): string[][] {
-  const sk = sportKey.toLowerCase();
-  if (sk.startsWith("soccer")) return [
-    ["h2h","totals","btts","draw_no_bet","double_chance","correct_score"],
-    ["btts_h1","correct_score_h1","double_chance_h1","halftime_fulltime","to_qualify","team_totals"],
-    ["corners_1x2","alternate_spreads_corners","alternate_totals_corners","alternate_spreads_cards","alternate_totals_cards","alternate_team_totals_corners"],
-    ["alternate_spreads","alternate_totals","alternate_team_totals"],
-  ];
-  if (sk.startsWith("basketball")) return [
-    ["h2h","spreads","totals","alternate_spreads","alternate_totals","alternate_team_totals","team_totals"],
-    ["h2h_q1","h2h_q2","h2h_q3","h2h_q4","h2h_h1","h2h_h2","spreads_q1","spreads_q2","spreads_q3","spreads_q4","spreads_h1","spreads_h2"],
-    ["totals_q1","totals_q2","totals_q3","totals_q4","totals_h1","totals_h2","team_totals_h1","team_totals_h2","team_totals_q1","team_totals_q2","team_totals_q3","team_totals_q4"],
-    ["alternate_spreads_q1","alternate_spreads_q2","alternate_spreads_q3","alternate_spreads_q4","alternate_spreads_h1","alternate_spreads_h2","alternate_totals_q1","alternate_totals_q2","alternate_totals_q3","alternate_totals_q4","alternate_totals_h1","alternate_totals_h2"],
-    ["alternate_team_totals_h1","alternate_team_totals_h2","alternate_team_totals_q1","alternate_team_totals_q2","alternate_team_totals_q3","alternate_team_totals_q4"],
-    ["player_points","player_rebounds","player_assists","player_threes","player_blocks","player_steals","player_turnovers","player_points_rebounds_assists","player_points_rebounds","player_points_assists","player_rebounds_assists","player_blocks_steals"],
-    ["player_field_goals","player_frees_made","player_frees_attempts","player_first_basket","player_first_team_basket","player_double_double","player_triple_double"],
-    ["player_points_alternate","player_rebounds_alternate","player_assists_alternate","player_blocks_alternate","player_steals_alternate","player_turnovers_alternate","player_threes_alternate"],
-  ];
-  if (sk.startsWith("americanfootball_nfl") || sk.startsWith("americanfootball_ncaaf")) return [
-    ["h2h","spreads","totals","alternate_spreads","alternate_totals","alternate_team_totals","team_totals"],
-    ["h2h_q1","h2h_q2","h2h_q3","h2h_q4","h2h_h1","h2h_h2","h2h_3_way_q1","h2h_3_way_q2","h2h_3_way_q3","h2h_3_way_q4","h2h_3_way_h1","h2h_3_way_h2"],
-    ["spreads_q1","spreads_q2","spreads_q3","spreads_q4","spreads_h1","spreads_h2","totals_q1","totals_q2","totals_q3","totals_q4","totals_h1","totals_h2"],
-    ["alternate_spreads_q1","alternate_spreads_q2","alternate_spreads_q3","alternate_spreads_q4","alternate_spreads_h1","alternate_spreads_h2","alternate_totals_q1","alternate_totals_q2","alternate_totals_q3","alternate_totals_q4","alternate_totals_h1","alternate_totals_h2"],
-    ["team_totals_h1","team_totals_h2","team_totals_q1","team_totals_q2","team_totals_q3","team_totals_q4"],
-    ["player_pass_tds","player_pass_yds","player_pass_attempts","player_pass_completions","player_pass_interceptions","player_pass_longest_completion","player_pass_rush_yds","player_pass_rush_reception_tds","player_pass_rush_reception_yds"],
-    ["player_rush_attempts","player_rush_yds","player_rush_tds","player_rush_longest","player_rush_reception_tds","player_rush_reception_yds","player_receptions","player_reception_yds","player_reception_tds","player_reception_longest"],
-    ["player_assists","player_field_goals","player_kicking_points","player_pats","player_sacks","player_solo_tackles","player_tackles_assists","player_defensive_interceptions","player_tds_over","player_1st_td","player_anytime_td","player_last_td"],
-  ];
-  if (sk.startsWith("icehockey")) return [
-    ["h2h","spreads","totals","alternate_spreads","alternate_totals"],
-    ["h2h_p1","h2h_p2","h2h_p3","h2h_h1","h2h_h2","h2h_3_way_p1","h2h_3_way_p2","h2h_3_way_p3","spreads_p1","spreads_p2","spreads_p3","totals_p1","totals_p2","totals_p3"],
-    ["alternate_spreads_p1","alternate_spreads_p2","alternate_spreads_p3","alternate_totals_p1","alternate_totals_p2","alternate_totals_p3"],
-    ["player_points","player_assists","player_goals","player_shots_on_goal","player_blocked_shots","player_power_play_points","player_total_saves","player_goal_scorer_first","player_goal_scorer_last","player_goal_scorer_anytime"],
-    ["player_points_alternate","player_assists_alternate","player_goals_alternate","player_shots_on_goal_alternate","player_blocked_shots_alternate","player_power_play_points_alternate","player_total_saves_alternate"],
-  ];
-  if (sk.startsWith("baseball")) return [
-    ["h2h","spreads","totals","alternate_spreads","alternate_totals"],
-    ["h2h_1st_1_innings","h2h_1st_3_innings","h2h_1st_5_innings","h2h_1st_7_innings","h2h_3_way_1st_1_innings","h2h_3_way_1st_3_innings","h2h_3_way_1st_5_innings","h2h_3_way_1st_7_innings"],
-    ["spreads_1st_1_innings","spreads_1st_3_innings","spreads_1st_5_innings","spreads_1st_7_innings","totals_1st_1_innings","totals_1st_3_innings","totals_1st_5_innings","totals_1st_7_innings"],
-    ["alternate_spreads_1st_1_innings","alternate_spreads_1st_3_innings","alternate_spreads_1st_5_innings","alternate_spreads_1st_7_innings","alternate_totals_1st_1_innings","alternate_totals_1st_3_innings","alternate_totals_1st_5_innings","alternate_totals_1st_7_innings"],
-    ["batter_home_runs","batter_hits","batter_total_bases","batter_rbis","batter_runs_scored","batter_hits_runs_rbis","batter_singles","batter_doubles","batter_triples","batter_walks","batter_strikeouts","batter_stolen_bases","batter_first_home_run"],
-    ["pitcher_strikeouts","pitcher_record_a_win","pitcher_hits_allowed","pitcher_walks","pitcher_earned_runs","pitcher_outs"],
-    ["batter_total_bases_alternate","batter_home_runs_alternate","batter_hits_alternate","batter_rbis_alternate","batter_walks_alternate","batter_strikeouts_alternate","batter_runs_scored_alternate","batter_hits_runs_rbis_alternate","batter_singles_alternate","batter_doubles_alternate","batter_triples_alternate"],
-    ["pitcher_hits_allowed_alternate","pitcher_walks_alternate","pitcher_earned_runs_alternate","pitcher_strikeouts_alternate","pitcher_outs_alternate"],
-  ];
-  if (sk.startsWith("tennis")) return [
-    ["h2h","spreads","totals","alternate_spreads","alternate_totals","h2h_s1","h2h_s2","spreads_s1","totals_s1","alternate_totals_s1"],
-  ];
-  return [["h2h","totals","spreads","alternate_spreads","alternate_totals"]];
-}
-
 function mergeBookmakers(base: OddsApiEventOdds, extra: OddsApiEventOdds): void {
   for (const extraBm of extra.bookmakers ?? []) {
     const baseBm = (base.bookmakers ?? []).find((b) => b.key === extraBm.key);
@@ -835,46 +804,38 @@ function mergeBookmakers(base: OddsApiEventOdds, extra: OddsApiEventOdds): void 
   }
 }
 
-async function fetchEventOdds(eventId: string, sportKey: string, region: string, bookmakers: string): Promise<OddsApiEventOdds | null> {
-  const batches = getMarketBatches(sportKey);
+async function fetchEventOdds(eventId: string, sportKey: string, region: string, bookmakers: string, markets: string[]): Promise<OddsApiEventOdds | null> {
+  const requestedMarkets = [...new Set(markets.filter(Boolean))];
+  if (requestedMarkets.length === 0) return null;
 
-  const fetchBatch = async (markets: string[]): Promise<OddsApiEventOdds | null> => {
-    // Use the main /odds/ endpoint with eventIds filter -- more reliable than the /events/{id}/odds/ endpoint
-    const url = `${ODDS_API_BASE}/sports/${sportKey}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&includeSids=true&bookmakers=${bookmakers}&markets=${markets.join(",")}&eventIds=${eventId}`;
-    try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        // Fallback to per-event endpoint
-        const fallbackUrl = `${ODDS_API_BASE}/sports/${sportKey}/events/${eventId}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&includeSids=true&bookmakers=${bookmakers}&markets=${markets.join(",")}`;
-        const fallbackRes = await fetch(fallbackUrl);
-        if (!fallbackRes.ok) { console.error(`EVENT ODDS BATCH ERROR: ${sportKey} event=${eventId} status=${res.status}/${fallbackRes.status}`); return null; }
-        const fallbackData = await fallbackRes.json();
-        if (!fallbackData || !fallbackData.id) return null;
-        return convertOddsToDecimal([fallbackData])[0] ?? null;
-      }
-      const data = await res.json();
-      const arr = unwrapOdds(data);
-      const match = arr.find((e: OddsApiEventOdds) => e.id === eventId);
-      if (!match) return null;
-      return convertOddsToDecimal([match])[0] ?? null;
-    } catch (err) { console.error(`EVENT ODDS BATCH ERROR: ${sportKey} event=${eventId}`, err); return null; }
-  };
+  const query = new URLSearchParams({
+    apiKey: API_KEY,
+    regions: region,
+    oddsFormat: "american",
+    includeLinks: "true",
+    includeSids: "true",
+    markets: requestedMarkets.join(","),
+  });
+  if (bookmakers) query.set("bookmakers", bookmakers);
 
-  const first = await fetchBatch(batches[0]);
-  if (!first) return null;
-
-  if (batches.length > 1) {
-    const rest = await Promise.all(batches.slice(1).map((b) => fetchBatch(b)));
-    for (const extra of rest) { if (extra) mergeBookmakers(first, extra); }
+  const url = `${ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/events/${encodeURIComponent(eventId)}/odds/?${query.toString()}`;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`EVENT ODDS ERROR: ${sportKey} event=${eventId} markets=${requestedMarkets.join(",")} status=${response.status}`);
+      return null;
+    }
+    const data = await response.json();
+    if (!data || data.id !== eventId) return null;
+    return convertOddsToDecimal([data])[0] ?? null;
+  } catch (err) {
+    console.error(`EVENT ODDS ERROR: ${sportKey} event=${eventId} markets=${requestedMarkets.join(",")}`, err);
+    return null;
   }
-
-  return first;
 }
 
 async function fetchSpecificEvent(eventId: string, sportKey: string, region: string, bookmakers: string): Promise<{ eventOdds: OddsApiEventOdds; sport: SportMapping } | null> {
   const sportMeta = getSportMetadata(sportKey);
-  const eventOdds = await fetchEventOdds(eventId, sportKey, region, bookmakers);
-  if (eventOdds) return { eventOdds, sport: sportMeta };
   const events = await fetchSportOdds(sportKey, region, bookmakers);
   const found = (events ?? []).find((e) => e?.id === eventId);
   if (!found) return null;
@@ -945,15 +906,27 @@ Deno.serve(async (req: Request) => {
       }
     }
     if (!matchedEvent || !matchedSport) { return noOddsFoundResponse(); }
-    const enriched = await fetchEventOdds(matchedEvent.id, matchedSport.key, cfg.regions, bookmakerQuery);
+    const fixtureOnly = isFixtureOnlyPrompt(text, matchedEvent);
+    const requestedLegs = fixtureOnly || selectedMarket ? [] : parseRequestedLegs(text, matchedEvent);
+    const requestedMarketKeys = getRequestedMarketKeys(requestedLegs, selectedMarket);
+    const eventEndpointMarkets = getEventEndpointMarkets(matchedEvent, requestedMarketKeys);
 
-    if (enriched && enriched.bookmakers && enriched.bookmakers.length > 0) { matchedEvent = enriched; }
+    if (eventEndpointMarkets.length > 0) {
+      const enriched = await fetchEventOdds(
+        matchedEvent.id,
+        matchedSport.key,
+        cfg.regions,
+        bookmakerQuery,
+        eventEndpointMarkets,
+      );
+      if (enriched?.bookmakers?.length) mergeBookmakers(matchedEvent, enriched);
+    }
 
     if (!matchedEvent.bookmakers || !Array.isArray(matchedEvent.bookmakers) || matchedEvent.bookmakers.length === 0) { return noOddsFoundResponse(); }
     const kickoffDate = new Date(matchedEvent.commence_time);
     const kickoff = kickoffDate.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     const competition = (matchedSport.key ?? "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    if (isFixtureOnlyPrompt(text, matchedEvent) || selectedMarket) {
+    if (fixtureOnly || selectedMarket) {
       const marketOptions = buildMarketOptions(matchedEvent, matchedSport.key);
       const bookmakerOdds = buildBookmakerOdds(matchedEvent);
       let defaultLeg: Leg | null = null;
@@ -980,7 +953,6 @@ Deno.serve(async (req: Request) => {
       const slip: SlipResponse = { match: `${matchedEvent.home_team} vs ${matchedEvent.away_team}`, sport: matchedSport.sport, sportIcon: matchedSport.icon, competition, kickoff, isSingleMatch: true, legs, totalOdds, stake: 0, potentialReturn: 0, probability, variance, safetyMessage, operators, systemNotices, source: "fixture-markets", marketOptions, bookmakerOdds, eventId: matchedEvent.id, sportKey: matchedSport.key };
       return new Response(JSON.stringify(slip), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    const requestedLegs = parseRequestedLegs(text, matchedEvent);
     const legs: Leg[] = []; const systemNotices: string[] = []; let hasMissingLeg = false;
     if (text.includes("high school") || text.includes("youth") || text.includes("under 18") || text.includes("u18")) { systemNotices.push("System Notice: Regulatory rules prohibit sports betting on high school sports, youth academy events, and under-18 competitions."); }
     if ((text.includes("college") || text.includes("ncaa")) && (text.includes("props") || text.includes("player")) && region === "us") { systemNotices.push("System Notice: State regulations prohibit betting on college athlete player props in NY, MA, OH, MD, VT, and TN."); }
