@@ -76,7 +76,7 @@ export interface BetSlip {
   safetyMessage: string;
   operators: OperatorOffer[];
   systemNotices: string[];
-  source: 'live' | 'fallback' | 'fixture-markets' | 'disambiguation';
+  source: 'live' | 'fixture-markets' | 'disambiguation';
   marketOptions?: MarketOption[];
   bookmakerOdds?: BookmakerOdds[];
   candidateFixtures?: CandidateFixture[];

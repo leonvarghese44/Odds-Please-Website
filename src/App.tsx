@@ -1,7 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { PredictionInput } from '@/components/PredictionInput';
-import { SearchTerminal } from '@/components/SearchTerminal';
 import { BetSlipCard } from '@/components/BetSlipCard';
 import { RestrictedMarketNotice } from '@/components/RestrictedMarketNotice';
 import { SignedOutHeroBanner } from '@/components/SignedOutHeroBanner';
@@ -11,25 +10,6 @@ import { DIALECT, REGION_CONFIG, type BetSlip, type Region, type Language, type 
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-const EMPTY_SLIP: BetSlip = {
-  match: '',
-  sport: '',
-  sportIcon: '',
-  competition: '',
-  kickoff: '',
-  isSingleMatch: false,
-  legs: [],
-  totalOdds: 0,
-  stake: 0,
-  potentialReturn: 0,
-  probability: 0,
-  variance: 'Low',
-  safetyMessage: '',
-  operators: [],
-  systemNotices: [],
-  source: 'fallback',
-};
 
 interface AppProps {
   region: Region;
@@ -48,8 +28,6 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
   const [quickPrompts, setQuickPrompts] = useState<LivePill[]>([]);
   const [selectedFixture, setSelectedFixture] = useState<{ eventId: string; sportKey: string } | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
-  const [searchTrigger, setSearchTrigger] = useState(0);
-  const [sakaActive, setSakaActive] = useState(false);
 
   const fetchLivePills = useCallback(async () => {
     try {
@@ -77,6 +55,7 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
 
     setLoading(true);
     setError(null);
+    setSlip(null);
 
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/analyze-prediction`, {
@@ -97,15 +76,26 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
+        if (res.status === 404) {
+          throw new Error('No odds found for this prediction.');
+        }
         throw new Error(errBody?.error || `Request failed: ${res.status}`);
       }
 
-      const data: BetSlip = await res.json();
+      const data = await res.json().catch(() => null) as BetSlip | null;
+      const hasResults = data?.source === 'disambiguation'
+        ? Boolean(data.candidateFixtures?.length)
+        : Boolean(data?.legs?.length);
+
+      if (!data || !hasResults) {
+        throw new Error('No odds found for this prediction.');
+      }
+
       setSlip(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to analyze prediction';
       setError(msg);
-      setSlip({ ...EMPTY_SLIP, systemNotices: [msg] });
+      setSlip(null);
     } finally {
       setLoading(false);
     }
@@ -146,15 +136,12 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
         language={language}
         prompt={prompt}
         onPromptChange={setPrompt}
-        onAnalyze={() => { setSearchTrigger(t => t + 1); analyze(); }}
+        onAnalyze={() => analyze()}
         onPillClick={handlePillClick}
-        onHotMarketClick={(text) => { setPrompt(text); setSearchTrigger(t => t + 1); analyze(text); }}
+        onHotMarketClick={(text) => { setPrompt(text); analyze(text); }}
         loading={loading}
         quickPrompts={quickPrompts}
       />
-
-      {/* Search Terminal — Saka golden path */}
-      <SearchTerminal query={prompt} trigger={searchTrigger} onPhaseChange={(p) => setSakaActive(p !== 'idle')} />
 
       {/* Restricted market notice — only shows for restricted search terms */}
       {/(u18|u21|youth|academy|under 18|under-18)/i.test(prompt) && (
@@ -173,15 +160,15 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
       )}
 
       {/* Loading */}
-      {loading && !slip && !sakaActive && (
+      {loading && !slip && (
         <div className="flex flex-col items-center justify-center gap-4 py-16 animate-fade-in">
           <Loader2 className="h-10 w-10 animate-spin text-emerald-500" />
           <p className="text-sm font-medium text-zinc-400">{strings.loading}</p>
         </div>
       )}
 
-      {/* Bet Slip — hidden when Saka search is active */}
-      {slip && !loading && !sakaActive && (
+      {/* Bet Slip */}
+      {slip && !loading && (
         <BetSlipCard
           slip={slip}
           region={region}

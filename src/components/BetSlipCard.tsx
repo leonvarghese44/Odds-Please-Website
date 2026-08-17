@@ -424,7 +424,7 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
     } else {
       setActiveMarket(marketPills[0].apiKey);
     }
-  }, [slip.id, hasBookmakerOdds]);
+  }, [slip.eventId, hasBookmakerOdds]);
 
   useEffect(() => {
     if (!hasBookmakerOdds) return;

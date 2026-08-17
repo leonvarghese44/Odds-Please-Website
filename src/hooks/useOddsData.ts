@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { DUMMY_ODDS } from '@/data/dummyOdds';
 
 const API_KEY = import.meta.env.VITE_ODDS_API_KEY || 'ccb5cfa1c1d8909e7668399923bbec06';
 const BASE_URL = 'https://api.the-odds-api.com/v4/sports';
@@ -91,7 +90,8 @@ export function useOddsData(sportKey = 'upcoming', region = 'uk') {
 
       if (!result || result.length === 0) {
         console.warn(`[OddsPlease] Empty live response for ${sportKey}.`);
-        setData(DUMMY_ODDS);
+        setData([]);
+        setError('No odds found for this sport.');
       } else {
         sessionStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), payload: result }));
         setData(result);
@@ -102,7 +102,7 @@ export function useOddsData(sportKey = 'upcoming', region = 'uk') {
       const msg = err instanceof Error ? err.message : 'Unknown fetch error';
       console.error('[OddsPlease] Fetch error:', msg);
       setError(msg);
-      setData(DUMMY_ODDS);
+      setData([]);
       setLoading(false);
     }
   }, [sportKey, region]);

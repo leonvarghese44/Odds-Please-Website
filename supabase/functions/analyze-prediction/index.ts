@@ -213,7 +213,7 @@ interface SlipResponse {
   match: string; sport: string; sportIcon: string; competition: string; kickoff: string; isSingleMatch: boolean;
   legs: Leg[]; totalOdds: number; stake: number; potentialReturn: number; probability: number;
   variance: "Low" | "Moderate" | "High"; safetyMessage: string; operators: OperatorOffer[]; systemNotices: string[];
-  source: "live" | "fallback" | "fixture-markets" | "disambiguation"; marketOptions?: MarketOption[];
+  source: "live" | "fixture-markets" | "disambiguation"; marketOptions?: MarketOption[];
   bookmakerOdds?: BookmakerOdds[]; candidateFixtures?: CandidateFixture[]; eventId?: string; sportKey?: string;
 }
 
@@ -443,7 +443,8 @@ function parseRequestedLegs(text: string, event: OddsApiEventOdds): RequestedLeg
   const hasDNBorDC = legs.some((l) => l.market === "Draw No Bet" || l.market === "Double Chance");
   const hasCorrectScore = legs.some((l) => l.market === "Correct Score");
   const hasToQualify = legs.some((l) => l.market === "To Qualify");
-  if (!hasDNBorDC && !hasCorrectScore && !hasToQualify) {
+  const asksForMatchResult = /\b(ml|moneyline|to win|to beat|match odds|1x2|h2h)\b/i.test(text);
+  if (!hasDNBorDC && !hasCorrectScore && !hasToQualify && asksForMatchResult) {
     const homeMatched = textMatchesTeam(text, event.home_team);
     const awayMatched = textMatchesTeam(text, event.away_team);
     if (homeMatched && !awayMatched) { addLeg(event.home_team, "Match Result (1X2)", "h2h"); }
@@ -454,7 +455,6 @@ function parseRequestedLegs(text: string, event: OddsApiEventOdds): RequestedLeg
       else { addLeg(event.home_team, "Match Result (1X2)", "h2h"); }
     } else if (/\b(ml|moneyline|to win|to beat)\b/i.test(text)) { addLeg(event.home_team, "Match Result (1X2)", "h2h"); }
   }
-  if (legs.length === 0) { addLeg(event.home_team, "Match Result (1X2)", "h2h"); }
   return legs;
 }
 
@@ -505,41 +505,11 @@ function buildBookmakerOdds(eventOdds: OddsApiEventOdds): BookmakerOdds[] {
   return result;
 }
 
-const MARKET_ANCHORED_OPERATORS = new Set(["sisal", "snai", "pokerstars"]);
-
-function marketAnchoredEstimate(realPrice: number, operatorKey: string): number {
-  let hash = 0;
-  for (let i = 0; i < operatorKey.length; i++) { hash = ((hash << 5) - hash + operatorKey.charCodeAt(i)) | 0; }
-  const spread = ((Math.abs(hash) % 101) - 50) / 1000;
-  return Math.max(1.01, Math.round((realPrice + spread) * 100) / 100);
-}
-
-function findBestOddsForSelection(eventOdds: OddsApiEventOdds, selection: string, marketKey?: string): number | null {
-  let best: number | null = null;
-  const selectionLower = selection.toLowerCase();
-  const firstWord = selectionLower.split(" ")[0];
-  for (const bookmaker of eventOdds.bookmakers ?? []) {
-    for (const market of bookmaker?.markets ?? []) {
-      if (marketKey && market.key !== marketKey) continue;
-      for (const outcome of market?.outcomes ?? []) {
-        if (!outcome?.name || !outcome?.price || outcome.price <= 0) continue;
-        const outcomeLower = outcome.name.toLowerCase();
-        if (outcomeLower === selectionLower || outcomeLower.includes(selectionLower) || selectionLower.includes(outcomeLower) || (market.key === "h2h" && (outcomeLower.includes(firstWord) || selectionLower.includes(outcomeLower.split(" ")[0])))) {
-          if (best === null || outcome.price > best) { best = outcome.price; }
-        }
-      }
-    }
-  }
-  return best;
-}
-
-function buildFallbackSlip(prediction: string, region: string): SlipResponse {
-  const text = prediction.toLowerCase();
-  let sport = "Soccer"; let icon = "\u26bd"; let competition = "Match Preview";
-  for (const s of SPORT_MAP) { if ((s.hints || []).some((h) => text.includes(h))) { sport = s.sport; icon = s.icon; competition = s.key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()); break; } }
-  const cfg = REGION_BOOKMAKERS[region] ?? REGION_BOOKMAKERS.uk;
-  const operators: OperatorOffer[] = (cfg.bookmakers || []).map((key) => ({ key, name: OPERATOR_NAMES[key] ?? key, available: false, combinedOdds: null, deepLink: "#", missingLegs: [] }));
-  return { match: "Match Preview", sport, sportIcon: icon, competition, kickoff: "Upcoming", isSingleMatch: true, legs: [], totalOdds: 0, stake: 0, potentialReturn: 0, probability: 0, variance: "Low", safetyMessage: "No live odds available for this fixture.", operators, systemNotices: [UNLISTED_NOTICE], source: "fallback" };
+function noOddsFoundResponse(): Response {
+  return new Response(
+    JSON.stringify({ error: "No odds found for this prediction." }),
+    { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
 }
 
 async function fetchSportOdds(sportKey: string, region: string, bookmakers: string): Promise<OddsApiEventOdds[]> {
@@ -708,11 +678,6 @@ function buildOperatorOffers(eventOdds: OddsApiEventOdds, legs: Leg[], cfg: { re
     const operatorName = OPERATOR_NAMES[bookmakerKey] ?? bookmakerKey;
     const fallbackDeepLink = buildDeepLink(bookmakerKey, eventId, sportKey, region);
     if (!bookmaker) {
-      if (region === "it" && MARKET_ANCHORED_OPERATORS.has(bookmakerKey) && legs.length > 0) {
-        const legOdds: number[] = []; let allAnchored = true;
-        for (const leg of legs) { const bestReal = findBestOddsForSelection(eventOdds, leg.selection); if (bestReal !== null && bestReal > 0) { legOdds.push(marketAnchoredEstimate(bestReal, bookmakerKey)); } else { allAnchored = false; break; } }
-        if (allAnchored && legOdds.length === legs.length) { operators.push({ key: bookmakerKey, name: operatorName, available: true, combinedOdds: legOdds.reduce((acc, o) => acc * o, 1), deepLink: fallbackDeepLink, missingLegs: [] }); continue; }
-      }
       operators.push({ key: bookmakerKey, name: operatorName, available: false, combinedOdds: null, deepLink: fallbackDeepLink, missingLegs: legs.map((l) => l.selection) }); continue;
     }
     const nativeLink = region === "it" ? null : getNativeBookmakerLink(bookmaker, "h2h");
@@ -750,11 +715,11 @@ Deno.serve(async (req: Request) => {
     let matchedEvent: OddsApiEventOdds | null = null; let matchedSport: SportMapping | null = null;
     if (selectedEventId && selectedSportKey) { const specific = await fetchSpecificEvent(selectedEventId, selectedSportKey, cfg.regions, bookmakerQuery); if (specific) { matchedEvent = specific.eventOdds; matchedSport = specific.sport; } }
     if (!matchedEvent) {
-      if (!prediction) { return new Response(JSON.stringify(buildFallbackSlip(prediction, region)), { headers: { ...corsHeaders, "Content-Type": "application/json" } }); }
+      if (!prediction) { return noOddsFoundResponse(); }
       const candidateSports = SPORT_MAP.filter((s) => (s.hints || []).some((h) => text.includes(h)));
       const sportsToSearch = candidateSports.length > 0 ? candidateSports : getSportsForRegion(region);
       const candidates = await fetchAndFindCandidates(text, cfg.regions, bookmakerQuery, sportsToSearch);
-      if (candidates.length === 0) { return new Response(JSON.stringify(buildFallbackSlip(prediction, region)), { headers: { ...corsHeaders, "Content-Type": "application/json" } }); }
+      if (candidates.length === 0) { return noOddsFoundResponse(); }
       const dualTeamCandidates = candidates.filter((c) => c.score === 2);
       const singleTeamCandidates = candidates.filter((c) => c.score === 1);
       if (dualTeamCandidates.length === 1) { matchedEvent = dualTeamCandidates[0].eventOdds; matchedSport = dualTeamCandidates[0].sport; }
@@ -765,12 +730,12 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify(disambiguationSlip), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
-    if (!matchedEvent || !matchedSport) { return new Response(JSON.stringify(buildFallbackSlip(prediction, region)), { headers: { ...corsHeaders, "Content-Type": "application/json" } }); }
+    if (!matchedEvent || !matchedSport) { return noOddsFoundResponse(); }
     const enriched = await fetchEventOdds(matchedEvent.id, matchedSport.key, cfg.regions, bookmakerQuery);
 
     if (enriched && enriched.bookmakers && enriched.bookmakers.length > 0) { matchedEvent = enriched; }
 
-    if (!matchedEvent.bookmakers || !Array.isArray(matchedEvent.bookmakers) || matchedEvent.bookmakers.length === 0) { return new Response(JSON.stringify(buildFallbackSlip(prediction, region)), { headers: { ...corsHeaders, "Content-Type": "application/json" } }); }
+    if (!matchedEvent.bookmakers || !Array.isArray(matchedEvent.bookmakers) || matchedEvent.bookmakers.length === 0) { return noOddsFoundResponse(); }
     const kickoffDate = new Date(matchedEvent.commence_time);
     const kickoff = kickoffDate.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     const competition = (matchedSport.key ?? "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -781,9 +746,11 @@ Deno.serve(async (req: Request) => {
       if (selectedMarket) {
         for (const bookmaker of matchedEvent.bookmakers ?? []) { for (const market of bookmaker?.markets ?? []) { if (market.key === selectedMarket) { for (const outcome of market?.outcomes ?? []) { if (outcome?.price && outcome.price > 0) { defaultLeg = { id: "leg-1", selection: outcome.name, market: market.key === "h2h" ? "Match Result (1X2)" : market.key === "btts" ? "BTTS" : market.key === "totals" ? "Over/Under Total Goals" : market.key, marketApiKey: market.key, odds: outcome.price, result: "Pending", features: detectFeatures(outcome.name, market.key, bookmaker.key) }; break; } } if (defaultLeg) break; } } if (defaultLeg) break; }
       }
-      if (!defaultLeg) { const h2hBookmaker = (matchedEvent.bookmakers ?? []).find((b) => (b?.markets ?? []).some((m) => m?.key === "h2h")); if (h2hBookmaker) { const h2h = (h2hBookmaker.markets ?? []).find((m) => m?.key === "h2h"); if (h2h && (h2h.outcomes ?? []).length > 0) { const homeOutcome = (h2h.outcomes ?? []).find((o) => o?.name === matchedEvent.home_team) ?? h2h.outcomes[0]; if (homeOutcome?.price && homeOutcome.price > 0) { defaultLeg = { id: "leg-1", selection: homeOutcome.name, market: "Match Result (1X2)", marketApiKey: "h2h", odds: homeOutcome.price, result: "Pending", features: detectFeatures(homeOutcome.name, "h2h", h2hBookmaker.key) }; } } } }
-      if (!defaultLeg) { for (const bookmaker of matchedEvent.bookmakers ?? []) { for (const market of bookmaker?.markets ?? []) { for (const outcome of market?.outcomes ?? []) { if (outcome?.price && outcome.price > 0) { defaultLeg = { id: "leg-1", selection: outcome.name, market: market.key === "h2h" ? "Match Result (1X2)" : market.key, marketApiKey: market.key, odds: outcome.price, result: "Pending", features: detectFeatures(outcome.name, market.key, bookmaker.key) }; break; } } if (defaultLeg) break; } if (defaultLeg) break; } }
+      if (selectedMarket && !defaultLeg) { return noOddsFoundResponse(); }
+      if (!selectedMarket && !defaultLeg) { const h2hBookmaker = (matchedEvent.bookmakers ?? []).find((b) => (b?.markets ?? []).some((m) => m?.key === "h2h")); if (h2hBookmaker) { const h2h = (h2hBookmaker.markets ?? []).find((m) => m?.key === "h2h"); if (h2h && (h2h.outcomes ?? []).length > 0) { const homeOutcome = (h2h.outcomes ?? []).find((o) => o?.name === matchedEvent.home_team) ?? h2h.outcomes[0]; if (homeOutcome?.price && homeOutcome.price > 0) { defaultLeg = { id: "leg-1", selection: homeOutcome.name, market: "Match Result (1X2)", marketApiKey: "h2h", odds: homeOutcome.price, result: "Pending", features: detectFeatures(homeOutcome.name, "h2h", h2hBookmaker.key) }; } } } }
+      if (!selectedMarket && !defaultLeg) { for (const bookmaker of matchedEvent.bookmakers ?? []) { for (const market of bookmaker?.markets ?? []) { for (const outcome of market?.outcomes ?? []) { if (outcome?.price && outcome.price > 0) { defaultLeg = { id: "leg-1", selection: outcome.name, market: market.key === "h2h" ? "Match Result (1X2)" : market.key, marketApiKey: market.key, odds: outcome.price, result: "Pending", features: detectFeatures(outcome.name, market.key, bookmaker.key) }; break; } } if (defaultLeg) break; } if (defaultLeg) break; } }
       const legs = defaultLeg ? [defaultLeg] : [];
+      if (legs.length === 0) { return noOddsFoundResponse(); }
       const _isUS = matchedSport.key.startsWith("basketball") || matchedSport.key.startsWith("americanfootball") || matchedSport.key.startsWith("baseball") || matchedSport.key.startsWith("icehockey");
       const _h2hLabel = _isUS ? "Moneyline" : matchedSport.key.startsWith("tennis") ? "Match Winner" : "Match Result (1X2)";
       const _totalsLabel = matchedSport.key.startsWith("soccer") ? "Over/Under Total Goals" : "Total Points";
@@ -800,7 +767,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(slip), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const requestedLegs = parseRequestedLegs(text, matchedEvent);
-    const legs: Leg[] = []; const systemNotices: string[] = [];
+    const legs: Leg[] = []; const systemNotices: string[] = []; let hasMissingLeg = false;
     if (text.includes("high school") || text.includes("youth") || text.includes("under 18") || text.includes("u18")) { systemNotices.push("System Notice: Regulatory rules prohibit sports betting on high school sports, youth academy events, and under-18 competitions."); }
     if ((text.includes("college") || text.includes("ncaa")) && (text.includes("props") || text.includes("player")) && region === "us") { systemNotices.push("System Notice: State regulations prohibit betting on college athlete player props in NY, MA, OH, MD, VT, and TN."); }
     if ((text.includes("college") || text.includes("ncaa")) && (text.includes("new york") || text.includes("new jersey") || text.includes("nj") || text.includes("ny")) && region === "us") { systemNotices.push("System Notice: State regulations prohibit betting on in-state college teams in NY, NJ, MA, CT, IL, and VA."); }
@@ -823,11 +790,9 @@ Deno.serve(async (req: Request) => {
           }
         }
       }
-      if (bestMatch) { legs.push(bestMatch.leg); } else if (!anyOperatorHasIt) { systemNotices.push(`System Notice: The requested market "${requested.selection}" is currently unavailable or unlisted by operators for this fixture. Please select an active market line.`); }
+      if (bestMatch) { legs.push(bestMatch.leg); } else { hasMissingLeg = true; if (!anyOperatorHasIt) { systemNotices.push(`System Notice: The requested market "${requested.selection}" is currently unavailable or unlisted by operators for this fixture. Please select an active market line.`); } }
     }
-    if (legs.length === 0) { const h2hBookmaker = (matchedEvent.bookmakers ?? []).find((b) => (b?.markets ?? []).some((m) => m?.key === "h2h")); if (h2hBookmaker) { const h2h = (h2hBookmaker.markets ?? []).find((m) => m?.key === "h2h"); if (h2h && (h2h.outcomes ?? []).length > 0) { const homeOutcome = (h2h.outcomes ?? []).find((o) => o?.name === matchedEvent.home_team) ?? h2h.outcomes[0]; if (homeOutcome?.price && homeOutcome.price > 0) { legs.push({ id: "leg-1", selection: homeOutcome.name, market: "Match Result (1X2)", odds: homeOutcome.price, result: "Pending", features: detectFeatures(homeOutcome.name, "h2h", h2hBookmaker.key) }); } } } }
-    if (legs.length === 0) { for (const bookmaker of matchedEvent.bookmakers ?? []) { for (const market of bookmaker?.markets ?? []) { for (const outcome of market?.outcomes ?? []) { if (outcome?.price && outcome.price > 0) { legs.push({ id: "leg-1", selection: outcome.name, market: market.key === "h2h" ? "Match Result (1X2)" : market.key, odds: outcome.price, result: "Pending", features: detectFeatures(outcome.name, market.key, bookmaker.key) }); break; } } if (legs.length > 0) break; } if (legs.length > 0) break; } }
-    if (legs.length === 0) { return new Response(JSON.stringify(buildFallbackSlip(prediction, region)), { headers: { ...corsHeaders, "Content-Type": "application/json" } }); }
+    if (hasMissingLeg || legs.length === 0 || legs.length !== requestedLegs.length) { return noOddsFoundResponse(); }
     const _isUSLive = matchedSport.key.startsWith("basketball") || matchedSport.key.startsWith("americanfootball") || matchedSport.key.startsWith("baseball") || matchedSport.key.startsWith("icehockey");
     const _h2hLabelLive = _isUSLive ? "Moneyline" : matchedSport.key.startsWith("tennis") ? "Match Winner" : "Match Result (1X2)";
     const _totalsLabelLive = matchedSport.key.startsWith("soccer") ? "Over/Under Total Goals" : "Total Points";
