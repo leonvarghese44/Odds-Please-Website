@@ -36,6 +36,11 @@ export function PredictionInput({
     inputRef.current?.focus();
   }, []);
 
+  const handleLivePillClick = (pill: LivePill) => {
+    onPillClick(pill);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
   return (
     <div className="mx-auto mt-8 w-full max-w-4xl">
       {/* Search card */}
@@ -93,7 +98,13 @@ export function PredictionInput({
           </div>
 
           <div className="w-full overflow-x-auto scrollbar-none flex items-center gap-2.5 py-3 px-2 mt-4 border-t border-zinc-800/60">
-            <HotMarkets region={region} onItemClick={onHotMarketClick} embedded />
+            <HotMarkets
+              region={region}
+              onItemClick={onHotMarketClick}
+              livePills={pills}
+              onLivePillClick={handleLivePillClick}
+              embedded
+            />
           </div>
         </div>
       </div>

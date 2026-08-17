@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { PredictionInput } from '@/components/PredictionInput';
 import { BetSlipCard } from '@/components/BetSlipCard';
@@ -6,10 +6,28 @@ import { RestrictedMarketNotice } from '@/components/RestrictedMarketNotice';
 import { SignedOutHeroBanner } from '@/components/SignedOutHeroBanner';
 import { AuthModal } from '@/components/AuthModal';
 import { useDemo } from '@/context/DemoContext';
-import { DIALECT, REGION_CONFIG, type BetSlip, type Region, type Language, type OddsFormat, type LivePill, type CandidateFixture } from '@/constants';
+import { DIALECT, REGION_CONFIG, getSportEmoji, type BetSlip, type Region, type Language, type OddsFormat, type LivePill, type CandidateFixture } from '@/constants';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+function normalizeLivePill(value: unknown): LivePill | null {
+  if (!value || typeof value !== 'object') return null;
+  const pill = value as Partial<LivePill>;
+  if (typeof pill.label !== 'string' || typeof pill.text !== 'string') return null;
+
+  const sportKey = typeof pill.sportKey === 'string' ? pill.sportKey : undefined;
+  const backendEmoji = typeof pill.emoji === 'string' && pill.emoji.trim() ? pill.emoji : '🏆';
+  return {
+    label: pill.label,
+    text: pill.text,
+    emoji: sportKey ? getSportEmoji(sportKey) : backendEmoji,
+    sportKey,
+    live: pill.live,
+    score: pill.score,
+    time: pill.time,
+  };
+}
 
 interface AppProps {
   region: Region;
@@ -29,25 +47,32 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
   const [selectedFixture, setSelectedFixture] = useState<{ eventId: string; sportKey: string } | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
 
-  const fetchLivePills = useCallback(async () => {
+  const fetchLivePills = useCallback(async (signal?: AbortSignal) => {
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/live-fixtures?region=${REGION_CONFIG[region].oddsApiRegion}`, {
         headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+        signal,
       });
       if (!res.ok) return;
       const data = await res.json();
       if (data?.pills && Array.isArray(data.pills)) {
-        setQuickPrompts(data.pills);
+        const normalizedPills = (data.pills as unknown[])
+          .map(normalizeLivePill)
+          .filter((pill): pill is LivePill => pill !== null);
+        setQuickPrompts(normalizedPills);
       }
     } catch {
       // silent fail — pills are non-critical
     }
   }, [region]);
 
-  // Fetch live pills on mount and when region changes
-  useState(() => {
-    fetchLivePills();
-  });
+  // Fetch live pills on mount and whenever the selected region changes.
+  useEffect(() => {
+    const controller = new AbortController();
+    setQuickPrompts([]);
+    fetchLivePills(controller.signal);
+    return () => controller.abort();
+  }, [fetchLivePills]);
 
   const analyze = useCallback(async (predictionText?: string, fixture?: { eventId: string; sportKey: string } | null, market?: string) => {
     const text = predictionText ?? prompt;

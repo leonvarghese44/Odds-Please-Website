@@ -1,6 +1,6 @@
 import { TrendingUp, Clock } from 'lucide-react';
 import type { BetSlip, Region, Language } from '../constants';
-import { REGION_CONFIG, DIALECT } from '../constants';
+import { REGION_CONFIG, getSportEmoji } from '../constants';
 
 interface EventHeaderCardProps {
   slip: BetSlip;
@@ -8,9 +8,8 @@ interface EventHeaderCardProps {
   language: Language;
 }
 
-export function EventHeaderCard({ slip, region, language }: EventHeaderCardProps) {
+export function EventHeaderCard({ slip, region }: EventHeaderCardProps) {
   const cfg = REGION_CONFIG[region];
-  const strings = DIALECT[region][language];
   const isIT = region === 'IT';
 
   const betFormat = slip.legs.length === 1
@@ -20,12 +19,13 @@ export function EventHeaderCard({ slip, region, language }: EventHeaderCardProps
       : cfg.betFormatMulti;
 
   const sportLabel = slip.sport.replace(/Soccer/gi, 'Football');
+  const sportIcon = getSportEmoji(slip.sportKey);
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-zinc-800 bg-black px-5 py-4">
       <div className="flex items-center gap-3">
         <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-2xl">
-          {slip.sportIcon}
+          {sportIcon}
         </div>
         <div>
           <h2 className="font-sans text-base font-bold leading-tight tracking-[-0.02em] text-white">{slip.match}</h2>

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { TrendingUp } from 'lucide-react';
-import type { Region } from '@/constants';
+import { getSportEmoji, type LivePill, type Region } from '@/constants';
 
 export interface TickerItem {
   category: string;
   text: string;
   searchText: string;
+  livePill?: LivePill;
 }
 
 export const ukTickerItems: TickerItem[] = [
@@ -69,18 +70,32 @@ function getItemsForRegion(region: Region): TickerItem[] {
   return ukTickerItems;
 }
 
+function livePillToTickerItem(pill: LivePill): TickerItem {
+  const emoji = pill.sportKey ? getSportEmoji(pill.sportKey) : pill.emoji || '🏆';
+  const normalizedPill = { ...pill, emoji };
+  return {
+    category: `${emoji} ${pill.live ? 'LIVE' : 'UPCOMING'}`,
+    text: pill.label,
+    searchText: pill.text,
+    livePill: normalizedPill,
+  };
+}
+
 interface HotMarketsProps {
   region: Region;
   onItemClick: (searchText: string) => void;
+  livePills?: LivePill[];
+  onLivePillClick?: (pill: LivePill) => void;
   embedded?: boolean;
 }
 
-export function HotMarkets({ region, onItemClick, embedded = false }: HotMarketsProps) {
+export function HotMarkets({ region, onItemClick, livePills, onLivePillClick, embedded = false }: HotMarketsProps) {
   const [items, setItems] = useState<TickerItem[]>([]);
 
   useEffect(() => {
-    setItems(getItemsForRegion(region));
-  }, [region]);
+    const liveItems = (livePills ?? []).map(livePillToTickerItem);
+    setItems(liveItems.length > 0 ? liveItems : getItemsForRegion(region));
+  }, [region, livePills]);
 
   const trackItems = items.length > 0 ? [...items, ...items] : [];
 
@@ -98,7 +113,9 @@ export function HotMarkets({ region, onItemClick, embedded = false }: HotMarkets
           {trackItems.map((item, idx) => (
             <button
               key={`${item.text}-${idx}`}
-              onClick={() => onItemClick(item.searchText)}
+              onClick={() => item.livePill && onLivePillClick
+                ? onLivePillClick(item.livePill)
+                : onItemClick(item.searchText)}
               className="flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 transition-all hover:border-[#63FF0E]/50"
             >
               <span className="rounded bg-zinc-800/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-zinc-300">{item.category}</span>

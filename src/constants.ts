@@ -98,6 +98,7 @@ export interface LivePill {
   label: string;
   text: string;
   emoji: string;
+  sportKey?: string;
   live?: boolean;
   score?: string;
   time?: string;
@@ -111,14 +112,35 @@ export interface SportMeta {
 
 export const SPORT_ICONS: Record<string, SportMeta> = {
   soccer: { key: 'soccer', icon: '⚽', label: 'Soccer' },
+  americanfootball: { key: 'americanfootball', icon: '🏈', label: 'American Football' },
+  americanfootball_nfl: { key: 'americanfootball_nfl', icon: '🏈', label: 'NFL' },
+  americanfootball_ncaaf: { key: 'americanfootball_ncaaf', icon: '🏈', label: 'NCAAF' },
   basketball: { key: 'basketball', icon: '🏀', label: 'Basketball' },
+  basketball_nba: { key: 'basketball_nba', icon: '🏀', label: 'NBA' },
+  basketball_ncaab: { key: 'basketball_ncaab', icon: '🏀', label: 'NCAAB' },
   football: { key: 'football', icon: '🏈', label: 'Football' },
   tennis: { key: 'tennis', icon: '🎾', label: 'Tennis' },
+  tennis_atp: { key: 'tennis_atp', icon: '🎾', label: 'ATP Tennis' },
+  tennis_wta: { key: 'tennis_wta', icon: '🎾', label: 'WTA Tennis' },
   motorsport: { key: 'motorsport', icon: '🏎️', label: 'Motorsport' },
   rugby: { key: 'rugby', icon: '🏉', label: 'Rugby' },
   baseball: { key: 'baseball', icon: '⚾', label: 'Baseball' },
+  baseball_mlb: { key: 'baseball_mlb', icon: '⚾', label: 'MLB' },
   hockey: { key: 'hockey', icon: '🏒', label: 'Hockey' },
+  icehockey: { key: 'icehockey', icon: '🏒', label: 'Ice Hockey' },
+  icehockey_nhl: { key: 'icehockey_nhl', icon: '🏒', label: 'NHL' },
 };
+
+export function getSportEmoji(sportKey?: string | null): string {
+  const normalizedKey = sportKey?.toLowerCase().trim();
+  if (!normalizedKey) return '🏆';
+
+  const exactMatch = SPORT_ICONS[normalizedKey];
+  if (exactMatch) return exactMatch.icon;
+
+  const prefix = normalizedKey.split('_')[0];
+  return SPORT_ICONS[prefix]?.icon ?? '🏆';
+}
 
 export interface FeatureMeta {
   badge: Record<Region, string>;
@@ -542,7 +564,7 @@ export const REGION_CONFIG: Record<Region, RegionConfig> = {
     statutoryText: 'Take time to think. Please gamble responsibly.',
     helplineLabel: 'National Gambling Helpline: 0808 8020 133',
     complianceRoute: '/safer-gambling',
-    placeholder: 'Arsenal to beat Coventry and Over 1.5 Total Goals',
+    placeholder: 'Try: Arsenal to win & Both Teams to Score',
     pills: [],
     betFormatSingle: 'BET BUILDER',
     betFormatMulti: 'ACCUMULATOR',
@@ -573,7 +595,7 @@ export const REGION_CONFIG: Record<Region, RegionConfig> = {
     statutoryText: 'Gambling Problem? Call 1-800-GAMBLER.',
     helplineLabel: '1-800-GAMBLER',
     complianceRoute: '/responsible-gaming',
-    placeholder: 'Chiefs moneyline, Mahomes 250+ pass yards, Kelce anytime TD',
+    placeholder: 'Try: Lakers moneyline or Mahomes 250+ yards',
     pills: [],
     betFormatSingle: 'SAME GAME PARLAY',
     betFormatMulti: 'PARLAY',
@@ -595,7 +617,7 @@ export const REGION_CONFIG: Record<Region, RegionConfig> = {
   IT: {
     label: 'IT',
     flag: '🇮🇹',
-    oddsApiRegion: 'eu',
+    oddsApiRegion: 'it',
     bookmakers: ['sisal', 'snai', 'pokerstars', 'betfair_sb_uk', 'betfair_ex_eu'],
     defaultOddsFormat: 'decimal',
     defaultLanguage: 'ITA',
@@ -603,7 +625,7 @@ export const REGION_CONFIG: Record<Region, RegionConfig> = {
     statutoryText: 'Il gioco d\u2019azzardo può causare dipendenza patologica. Gioca responsabile.',
     helplineLabel: 'Telefono Verde Nazionale (TVNGA): 800 558822',
     complianceRoute: '/gioco-responsabile',
-    placeholder: 'Inserisci evento, squadra o mercato',
+    placeholder: 'Try: Sinner to win 2-0 or Inter moneyline',
     pills: [],
     betFormatSingle: 'STESSO EVENTO',
     betFormatMulti: 'MULTIPLA',
@@ -710,21 +732,19 @@ export const TEAM_ALIASES: Record<string, string[]> = {
 
 export const FALLBACK_PILLS: Record<Region, LivePill[]> = {
   UK: [
-    { label: 'Premier League', text: 'Premier League', emoji: '⚽' },
-    { label: 'Champions League', text: 'Champions League', emoji: '⚽' },
-    { label: 'Tennis ATP', text: 'Tennis ATP', emoji: '🎾' },
-    { label: 'Rugby Super League', text: 'Rugby Super League', emoji: '🏉' },
+    { label: 'Premier League', text: 'Premier League', emoji: '⚽', sportKey: 'soccer_epl' },
+    { label: 'Champions League', text: 'Champions League', emoji: '⚽', sportKey: 'soccer_uefa_champs_league' },
+    { label: 'Tennis ATP', text: 'Tennis ATP', emoji: '🎾', sportKey: 'tennis_atp' },
   ],
   US: [
-    { label: 'NFL', text: 'NFL', emoji: '🏈' },
-    { label: 'NBA', text: 'NBA', emoji: '🏀' },
-    { label: 'MLB', text: 'MLB', emoji: '⚾' },
-    { label: 'NHL', text: 'NHL', emoji: '🏒' },
+    { label: 'NFL', text: 'NFL', emoji: '🏈', sportKey: 'americanfootball_nfl' },
+    { label: 'NBA', text: 'NBA', emoji: '🏀', sportKey: 'basketball_nba' },
+    { label: 'MLB', text: 'MLB', emoji: '⚾', sportKey: 'baseball_mlb' },
+    { label: 'NHL', text: 'NHL', emoji: '🏒', sportKey: 'icehockey_nhl' },
   ],
   IT: [
-    { label: 'Serie A', text: 'Serie A', emoji: '⚽' },
-    { label: 'Champions League', text: 'Champions League', emoji: '⚽' },
-    { label: 'Tennis ATP', text: 'Tennis ATP', emoji: '🎾' },
-    { label: 'Formula 1', text: 'Formula 1', emoji: '🏎️' },
+    { label: 'Serie A', text: 'Serie A', emoji: '⚽', sportKey: 'soccer_italy_serie_a' },
+    { label: 'Champions League', text: 'Champions League', emoji: '⚽', sportKey: 'soccer_uefa_champs_league' },
+    { label: 'Tennis ATP', text: 'Tennis ATP', emoji: '🎾', sportKey: 'tennis_atp' },
   ],
 };
