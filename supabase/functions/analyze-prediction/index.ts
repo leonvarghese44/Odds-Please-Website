@@ -7,7 +7,11 @@ const corsHeaders = {
 };
 
 const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
-const API_KEY = Deno.env.get("ODDS_API_KEY") ?? "ccb5cfa1c1d8909e7668399923bbec06";
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const API_KEY = Deno.env.get("ODDS_API_KEY") ?? "";
+const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
+const SPORT_CLASSIFIER_MODEL = Deno.env.get("SPORT_CLASSIFIER_MODEL") ?? "gpt-5.4-nano";
+const ATP_SPORT_KEY = "tennis_atp";
 
 interface SportMapping {
   key: string;
@@ -24,7 +28,7 @@ const SPORT_MAP: SportMapping[] = [
   { key: "americanfootball_nfl", sport: "Football", icon: "\ud83c\udfc8", hints: ["nfl", "football", "chiefs", "kansas city chiefs", "bills", "buffalo bills", "mahomes", "patrick mahomes", "cowboys", "dallas cowboys", "eagles", "philadelphia eagles", "packers", "green bay packers", "49ers", "san francisco 49ers", "ravens", "baltimore ravens", "bengals", "cincinnati bengals", "lions", "detroit lions", "jets", "new york jets", "dolphins", "miami dolphins", "kelce", "travis kelce", "seahawks", "seattle seahawks", "seattle", "falcons", "atlanta falcons", "atlanta", "patriots", "new england patriots", "pats", "rams", "los angeles rams", "steelers", "pittsburgh steelers", "colts", "indianapolis colts", "texans", "houston texans", "panthers", "carolina panthers", "bears", "chicago bears", "buccaneers", "tampa bay buccaneers", "bucs", "jaguars", "jacksonville jaguars", "browns", "cleveland browns", "saints", "new orleans saints", "titans", "tennessee titans", "vikings", "minnesota vikings", "chargers", "los angeles chargers", "raiders", "las vegas raiders", "broncos", "denver broncos", "commanders", "washington commanders", "cardinals", "arizona cardinals"] },
   { key: "baseball_mlb", sport: "Baseball", icon: "\u26be", hints: ["mlb", "baseball", "dodgers", "los angeles dodgers", "padres", "san diego padres", "yankees", "new york yankees", "red sox", "boston red sox", "astros", "houston astros", "braves", "atlanta braves", "atlanta", "cubs", "chicago cubs", "mets", "new york mets", "phillies", "philadelphia phillies", "brewers", "milwaukee brewers", "pirates", "pittsburgh pirates", "cardinals", "st louis cardinals", "reds", "cincinnati reds", "giants", "san francisco giants", "rockies", "colorado rockies", "diamondbacks", "arizona diamondbacks", "dbacks", "padres", "rays", "tampa bay rays", "twins", "minnesota twins", "white sox", "chicago white sox", "guardians", "cleveland guardians", "tigers", "detroit tigers", "royals", "kansas city royals", "angels", "los angeles angels", "athletics", "oakland athletics", "a's", "mariners", "seattle mariners", "rangers", "texas rangers", "nationals", "washington nationals", "orioles", "baltimore orioles", "blue jays", "toronto blue jays", "marlins", "miami marlins"] },
   { key: "icehockey_nhl", sport: "Hockey", icon: "\ud83c\udfd2", hints: ["nhl", "hockey", "rangers", "new york rangers", "bruins", "boston bruins", "maple leafs", "toronto maple leafs", "oilers", "edmonton oilers", "avalanche", "colorado avalanche", "penguins", "pittsburgh penguins", "panthers", "florida panthers", "stars", "dallas stars", "devils", "new jersey devils", "islanders", "new york islanders", "seattle kraken", "kraken", "sabres", "buffalo sabres", "canadiens", "montreal canadiens", "canadiens", "senators", "ottawa senators", "jets", "winnipeg jets", "flames", "calgary flames", "canucks", "vancouver canucks", "sharks", "san jose sharks", "kings", "los angeles kings", "ducks", "anaheim ducks", "coyotes", "arizona coyotes", "wild", "minnesota wild", "predators", "nashville predators", "blackhawks", "chicago blackhawks", "red wings", "detroit red wings", "blue jackets", "columbus blue jackets", "flyers", "philadelphia flyers", "capitals", "washington capitals", "hurricanes", "carolina hurricanes", "lightning", "tampa bay lightning", "golden knights", "vegas golden knights", "knights"] },
-  { key: "tennis_atp_singles", sport: "Tennis", icon: "\ud83c\udfbe", hints: ["tennis", "atp", "alcaraz", "carlos alcaraz", "djokovic", "novak djokovic", "sinner", "jannik sinner", "medvedev", "daniil medvedev", "federer", "roger federer", "nadal", "rafa nadal", "zverev", "alexander zverev", "wimbledon", "us open", "french open", "australian open", "tsitsipas", "rublev", "hurkacz", "ruud", "khachanov", "de minaur", "fritz", "shelton", "tiafoe", "paul"] },
+  { key: ATP_SPORT_KEY, sport: "Tennis", icon: "\ud83c\udfbe", hints: ["tennis", "atp", "alcaraz", "carlos alcaraz", "djokovic", "novak djokovic", "sinner", "jannik sinner", "medvedev", "daniil medvedev", "federer", "roger federer", "nadal", "rafa nadal", "zverev", "alexander zverev", "wimbledon", "us open", "french open", "australian open", "tsitsipas", "rublev", "hurkacz", "ruud", "khachanov", "de minaur", "fritz", "shelton", "tiafoe", "paul"] },
   { key: "rugby_league_super_league", sport: "Rugby", icon: "\ud83c\udfc9", hints: ["super league", "rugby", "rhinos", "leeds rhinos", "wigan warriors", "wigan", "st helens", "warrington wolves", "warrington", "hull fc", "hull kr", "castleford tigers", "castleford", "huddersfield giants", "huddersfield", "catalan dragons", "catalan", "salford red devils", "salford", "wakefield trinity", "wakefield", "leigh leopards", "leigh"] },
   { key: "motorsport_f1", sport: "Motorsport", icon: "\ud83c\udfce\ufe0f", hints: ["f1", "formula 1", "formula one", "monaco", "grand prix", "gp", "verstappen", "max verstappen", "hamilton", "lewis hamilton", "leclerc", "charles leclerc", "norris", "lando norris", "russell", "george russell", "perez", "sergio perez", "sainz", "carlos sainz", "alonso", "fernando alonso", "piastri", "oscar piastri", "gasly", "ocon", "bottas", "zhou", "stroll", "hulkenberg", "magnussen", "tsunoda", "ricciardo", "albon", "sargeant"] },
   { key: "soccer_club_friendlies", sport: "Soccer", icon: "\u26bd", hints: ["friendly", "friendlies", "club friendly", "club friendlies", "pre-season", "pre season", "preseason"] },
@@ -52,15 +56,169 @@ const SPORT_MAP: SportMapping[] = [
 ];
 
 const REGION_SPORTS: Record<string, string[]> = {
-  uk: ["soccer_epl", "soccer_efl_champ", "soccer_england_league1", "soccer_england_league2", "soccer_scotland_prem", "soccer_uefa_champs_league", "soccer_uefa_europa_league", "soccer_uefa_europa_conference_league", "soccer_england_efl_cup", "soccer_england_fa_cup", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one", "soccer_germany_bundesliga2", "soccer_france_ligue2", "soccer_netherlands_eredivisie", "soccer_portugal_primeira_liga", "soccer_uefa_nations_league", "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_spain_segunda_division", "tennis_atp_singles", "rugby_league_super_league"],
-  us: ["americanfootball_nfl", "basketball_nba", "baseball_mlb", "icehockey_nhl", "soccer_epl", "soccer_uefa_champs_league", "soccer_uefa_europa_league", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one", "soccer_italy_serie_a", "soccer_uefa_nations_league", "tennis_atp_singles"],
-  it: ["soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_uefa_champs_league", "soccer_uefa_europa_league", "soccer_uefa_europa_conference_league", "soccer_italy_coppa_italia", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one", "soccer_epl", "soccer_uefa_nations_league", "tennis_atp_singles", "motorsport_f1"],
+  uk: ["soccer_epl", "soccer_efl_champ", "soccer_england_league1", "soccer_england_league2", "soccer_scotland_prem", "soccer_uefa_champs_league", "soccer_uefa_europa_league", "soccer_uefa_europa_conference_league", "soccer_england_efl_cup", "soccer_england_fa_cup", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one", "soccer_germany_bundesliga2", "soccer_france_ligue2", "soccer_netherlands_eredivisie", "soccer_portugal_primeira_liga", "soccer_uefa_nations_league", "soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_spain_segunda_division", ATP_SPORT_KEY, "rugby_league_super_league"],
+  us: ["americanfootball_nfl", "basketball_nba", "baseball_mlb", "icehockey_nhl", "soccer_epl", "soccer_uefa_champs_league", "soccer_uefa_europa_league", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one", "soccer_italy_serie_a", "soccer_uefa_nations_league", ATP_SPORT_KEY],
+  it: ["soccer_italy_serie_a", "soccer_italy_serie_b", "soccer_uefa_champs_league", "soccer_uefa_europa_league", "soccer_uefa_europa_conference_league", "soccer_italy_coppa_italia", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_france_ligue_one", "soccer_epl", "soccer_uefa_nations_league", ATP_SPORT_KEY, "motorsport_f1"],
 };
 
 function getSportsForRegion(region: string): SportMapping[] {
   const keys = REGION_SPORTS[region] ?? Object.values(REGION_SPORTS).flat();
   const keySet = new Set(keys);
   return SPORT_MAP.filter((s) => keySet.has(s.key));
+}
+
+function getSportMetadata(sportKey: string): SportMapping {
+  const configured = SPORT_MAP.find((sport) => sport.key === sportKey);
+  if (configured) return configured;
+  if (sportKey.startsWith("tennis_atp_")) return { key: sportKey, sport: "Tennis", icon: "\ud83c\udfbe", hints: [] };
+  if (sportKey.startsWith("basketball")) return { key: sportKey, sport: "Basketball", icon: "\ud83c\udfc0", hints: [] };
+  if (sportKey.startsWith("americanfootball")) return { key: sportKey, sport: "Football", icon: "\ud83c\udfc8", hints: [] };
+  if (sportKey.startsWith("baseball")) return { key: sportKey, sport: "Baseball", icon: "\u26be", hints: [] };
+  if (sportKey.startsWith("icehockey")) return { key: sportKey, sport: "Hockey", icon: "\ud83c\udfd2", hints: [] };
+  return { key: sportKey, sport: "Soccer", icon: "\u26bd", hints: [] };
+}
+
+const CLASSIFIABLE_SPORT_KEYS = [...new Set(SPORT_MAP.map((sport) => sport.key))];
+const CLASSIFIABLE_SPORT_KEY_SET = new Set(CLASSIFIABLE_SPORT_KEYS);
+const SPORT_CLASSIFICATION_SYSTEM_PROMPT = `You classify a plain-English betting query into one The Odds API sport_key.
+Return a JSON object containing only sport_key, selected from this allowlist: ${CLASSIFIABLE_SPORT_KEYS.join(", ")}.
+Use the most specific league or tournament named or implied by the teams and players.
+Core mappings: NBA=basketball_nba; NFL=americanfootball_nfl; MLB=baseball_mlb; NHL=icehockey_nhl; ATP men's tennis=${ATP_SPORT_KEY}.
+Treat "football" as association football for UK/IT context unless NFL teams, players, or American-football markets are present. Treat it as NFL in US context only when the query contains NFL evidence.
+Use the supplied region only to break genuine ties. Never invent a sport_key and never classify a betting market as a sport.`;
+
+interface OddsApiSport {
+  key: string;
+  group?: string;
+  title?: string;
+  active?: boolean;
+  has_outrights?: boolean;
+}
+
+interface SportClassifierResponse {
+  output_text?: string;
+  output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+}
+
+let activeAtpCache: { expiresAt: number; sports: SportMapping[] } | null = null;
+
+function getClassifierOutputText(payload: SportClassifierResponse): string | null {
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) return payload.output_text.trim();
+  for (const item of payload?.output ?? []) {
+    for (const content of item?.content ?? []) {
+      if (content?.type === "output_text" && typeof content.text === "string") return content.text.trim();
+    }
+  }
+  return null;
+}
+
+async function classifySportWithLlm(prediction: string, region: string): Promise<string | null> {
+  if (!OPENAI_API_KEY || !prediction.trim()) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3000);
+  try {
+    const response = await fetch(OPENAI_RESPONSES_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: SPORT_CLASSIFIER_MODEL,
+        instructions: SPORT_CLASSIFICATION_SYSTEM_PROMPT,
+        input: `Region: ${region}\nQuery: ${prediction}`,
+        max_output_tokens: 40,
+        text: {
+          format: {
+            type: "json_schema",
+            name: "sport_classification",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: { sport_key: { type: "string", enum: CLASSIFIABLE_SPORT_KEYS } },
+              required: ["sport_key"],
+              additionalProperties: false,
+            },
+          },
+        },
+      }),
+    });
+    if (!response.ok) {
+      console.error(`SPORT CLASSIFIER ERROR: status=${response.status}`);
+      return null;
+    }
+    const payload = await response.json() as SportClassifierResponse;
+    const outputText = getClassifierOutputText(payload);
+    if (!outputText) return null;
+    const parsed = JSON.parse(outputText) as { sport_key?: string };
+    return parsed?.sport_key && CLASSIFIABLE_SPORT_KEY_SET.has(parsed.sport_key) ? parsed.sport_key : null;
+  } catch (err) {
+    console.error("SPORT CLASSIFIER ERROR:", err instanceof Error ? err.message : "Unknown classifier error");
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function getHintMatchedSports(text: string): SportMapping[] {
+  const scored = SPORT_MAP.map((sport) => ({
+    sport,
+    score: Math.max(0, ...(sport.hints ?? []).filter((hint) => text.includes(hint)).map((hint) => hint.length)),
+  })).filter(({ score }) => score > 0);
+  if (scored.length === 0) return [];
+  const bestScore = Math.max(...scored.map(({ score }) => score));
+  const seen = new Set<string>();
+  return scored
+    .filter(({ score }) => score === bestScore)
+    .map(({ sport }) => sport)
+    .filter((sport) => {
+      if (seen.has(sport.key)) return false;
+      seen.add(sport.key);
+      return true;
+    });
+}
+
+async function getActiveAtpSports(): Promise<SportMapping[]> {
+  if (activeAtpCache && activeAtpCache.expiresAt > Date.now()) return activeAtpCache.sports;
+  try {
+    const response = await fetch(`${ODDS_API_BASE}/sports/?apiKey=${API_KEY}`);
+    if (!response.ok) {
+      console.error(`ATP SPORT DISCOVERY ERROR: status=${response.status}`);
+      return [];
+    }
+    const data = await response.json().catch(() => []) as OddsApiSport[];
+    const sports = (Array.isArray(data) ? data : [])
+      .filter((sport) => sport?.active !== false && !sport?.has_outrights && sport?.key?.startsWith("tennis_atp_"))
+      .map((sport) => ({ key: sport.key, sport: "Tennis", icon: "\ud83c\udfbe", hints: [] }))
+      .slice(0, 4);
+    activeAtpCache = { expiresAt: Date.now() + 10 * 60 * 1000, sports };
+    return sports;
+  } catch (err) {
+    console.error("ATP SPORT DISCOVERY ERROR:", err instanceof Error ? err.message : "Unknown discovery error");
+    return [];
+  }
+}
+
+async function expandDynamicSports(sports: SportMapping[]): Promise<SportMapping[]> {
+  const expanded: SportMapping[] = [];
+  for (const sport of sports) {
+    if (sport.key === ATP_SPORT_KEY) expanded.push(...await getActiveAtpSports());
+    else expanded.push(sport);
+  }
+  const seen = new Set<string>();
+  return expanded.filter((sport) => {
+    if (seen.has(sport.key)) return false;
+    seen.add(sport.key);
+    return true;
+  });
+}
+
+async function getSportsForPrediction(prediction: string, text: string, region: string): Promise<SportMapping[]> {
+  const llmSportKey = await classifySportWithLlm(prediction, region);
+  if (llmSportKey) {
+    const classified = SPORT_MAP.find((sport) => sport.key === llmSportKey);
+    if (classified) return expandDynamicSports([classified]);
+  }
+  const hintMatches = getHintMatchedSports(text);
+  return expandDynamicSports(hintMatches.length > 0 ? hintMatches : getSportsForRegion(region));
 }
 
 const TEAM_ALIASES: Record<string, string[]> = {
@@ -196,19 +354,18 @@ const TEAM_ALIASES: Record<string, string[]> = {
   "vegas golden knights": ["golden knights", "knights"],
 };
 
-interface OddsApiLink { rel?: string; href?: string; }
-interface OddsApiOutcome { name: string; price: number; point?: number; link?: string; }
-interface OddsApiMarket { key: string; outcomes: OddsApiOutcome[]; description?: string; link?: string; }
-interface OddsApiBookmaker { key: string; title: string; link?: string; markets: OddsApiMarket[]; }
+interface OddsApiOutcome { name: string; description?: string; price: number; point?: number; link?: string; sid?: string | number | null; }
+interface OddsApiMarket { key: string; outcomes: OddsApiOutcome[]; description?: string; link?: string; sid?: string | number | null; }
+interface OddsApiBookmaker { key: string; title: string; link?: string; sid?: string | number | null; markets: OddsApiMarket[]; }
 interface OddsApiEventOdds { id: string; sport_key: string; commence_time: string; home_team: string; away_team: string; bookmakers: OddsApiBookmaker[]; }
 
 interface Leg { id: string; selection: string; market: string; marketApiKey?: string; point?: number; odds: number; result: string; features: string[]; prevOdds?: number; }
 interface MarketOption { market: string; label: string; outcomes: { name: string; price: number; point?: number }[]; apiKey?: string; }
 interface OperatorOffer { key: string; name: string; available: boolean; combinedOdds: number | null; deepLink: string; missingLegs: string[]; }
 interface CandidateFixture { eventId: string; match: string; sportKey: string; sport: string; sportIcon: string; competition: string; kickoff: string; }
-interface BookmakerOutcome { name: string; price: number; point?: number; link?: string; }
-interface BookmakerMarket { key: string; outcomes: BookmakerOutcome[]; link?: string; }
-interface BookmakerOdds { key: string; name: string; markets: BookmakerMarket[]; link?: string; }
+interface BookmakerOutcome { name: string; description?: string; price: number; point?: number; link?: string; sid?: string | number | null; }
+interface BookmakerMarket { key: string; outcomes: BookmakerOutcome[]; link?: string; sid?: string | number | null; }
+interface BookmakerOdds { key: string; name: string; markets: BookmakerMarket[]; link?: string; sid?: string | number | null; }
 interface SlipResponse {
   match: string; sport: string; sportIcon: string; competition: string; kickoff: string; isSingleMatch: boolean;
   legs: Leg[]; totalOdds: number; stake: number; potentialReturn: number; probability: number;
@@ -231,32 +388,92 @@ const REGION_BOOKMAKERS: Record<string, { regions: string; bookmakers: string[] 
 
 const UNLISTED_NOTICE = "System Notice: Live odds for this specific matchup are currently unlisted or undergoing line updates by licensed operators. Please try selecting another active fixture.";
 
+function getBookmakerSportPath(sportKey: string): string {
+  if (sportKey.startsWith("americanfootball")) return "american-football";
+  if (sportKey.startsWith("basketball")) return "basketball";
+  if (sportKey.startsWith("baseball")) return "baseball";
+  if (sportKey.startsWith("icehockey")) return "ice-hockey";
+  if (sportKey.startsWith("tennis")) return "tennis";
+  return "football";
+}
+
 function buildDeepLink(operatorKey: string, eventId: string, sportKey: string, region?: string): string {
+  const sportPath = getBookmakerSportPath(sportKey);
+  const encodedEventId = encodeURIComponent(eventId);
   switch (operatorKey) {
-    case "paddypower": return `https://www.paddypower.com/football?eventId=${eventId}`;
-    case "skybet": return `https://www.skybet.com/football`;
-    case "betfair_sb_uk": return region === "it" ? `https://www.betfair.it/sport/football/event?eventId=${eventId}` : `https://www.betfair.com/sport/football/event?eventId=${eventId}`;
-    case "betfair_ex_uk": return `https://www.betfair.com/exchange/plus/football/event?eventId=${eventId}`;
-    case "fanduel": return `https://sportsbook.fanduel.com/navigation/${sportKey}?event=${eventId}`;
-    case "draftkings": return `https://sportsbook.draftkings.com/sitesearch?search=${eventId}`;
-    case "sisal": return `https://www.sisal.it/scommesse-matchpoint/search?q=${eventId}`;
-    case "snai": return `https://www.snai.it/sport/search?q=${eventId}`;
-    case "pokerstars": return `https://www.pokerstars.it/sports/search?q=${eventId}`;
-    case "betfair_ex_eu": return `https://www.betfair.it/exchange/plus/football/event?eventId=${eventId}`;
-    case "williamhill": return `https://www.williamhill.com/football`;
-    case "coral": return `https://www.coral.co.uk/football`;
-    case "ladbrokes_uk": return `https://www.ladbrokes.com/football`;
-    case "betvictor": return `https://www.betvictor.com/football`;
-    default: return "#";
+    case "paddypower": return `https://www.paddypower.com/${sportPath}?eventId=${encodedEventId}`;
+    case "skybet": return `https://www.skybet.com/${sportPath}?eventId=${encodedEventId}`;
+    case "betfair_sb_uk": return region === "it" ? `https://www.betfair.it/sport/${sportPath}/event?eventId=${encodedEventId}` : `https://www.betfair.com/sport/${sportPath}/event?eventId=${encodedEventId}`;
+    case "betfair_ex_uk": return `https://www.betfair.com/exchange/plus/${sportPath}/event?eventId=${encodedEventId}`;
+    case "fanduel": return `https://sportsbook.fanduel.com/navigation/${sportPath}?event=${encodedEventId}`;
+    case "draftkings": return `https://sportsbook.draftkings.com/sitesearch?search=${encodedEventId}`;
+    case "sisal": return `https://www.sisal.it/scommesse-matchpoint/search?q=${encodedEventId}`;
+    case "snai": return `https://www.snai.it/sport/search?q=${encodedEventId}`;
+    case "pokerstars": return `https://www.pokerstars.it/sports/search?q=${encodedEventId}`;
+    case "betfair_ex_eu": return `https://www.betfair.it/exchange/plus/${sportPath}/event?eventId=${encodedEventId}`;
+    case "williamhill": return `https://www.williamhill.com/${sportPath}?eventId=${encodedEventId}`;
+    case "coral": return `https://www.coral.co.uk/${sportPath}?eventId=${encodedEventId}`;
+    case "ladbrokes_uk": return `https://www.ladbrokes.com/${sportPath}?eventId=${encodedEventId}`;
+    case "betvictor": return `https://www.betvictor.com/${sportPath}?eventId=${encodedEventId}`;
+    default: return "";
   }
 }
 
-function getNativeBookmakerLink(bookmaker: OddsApiBookmaker | undefined, _marketKey: string): string | null {
-  if (!bookmaker) return null;
-  for (const market of bookmaker.markets ?? []) { for (const outcome of market?.outcomes ?? []) { if (outcome?.link) return outcome.link; } }
-  for (const market of bookmaker.markets ?? []) { if (market?.link) return market.link; }
-  if (bookmaker.link) return bookmaker.link;
+function appendSourceIds(
+  link: string,
+  ids: { eventSid?: string | number | null; marketSid?: string | number | null; selectionSid?: string | number | null },
+): string {
+  if (!link) return "";
+  try {
+    const url = new URL(link);
+    if (ids.eventSid != null && !url.searchParams.has("eventId")) url.searchParams.set("eventId", String(ids.eventSid));
+    if (ids.marketSid != null && !url.searchParams.has("marketId")) url.searchParams.set("marketId", String(ids.marketSid));
+    if (ids.selectionSid != null && !url.searchParams.has("selectionId") && !url.searchParams.has("outcomeId")) {
+      url.searchParams.set("selectionId", String(ids.selectionSid));
+    }
+    return url.toString();
+  } catch {
+    return link;
+  }
+}
+
+function findBookmakerSelection(
+  bookmaker: OddsApiBookmaker,
+  leg: Leg,
+): { market: OddsApiMarket; outcome: OddsApiOutcome } | null {
+  const allowedMarketKeys = leg.marketApiKey ? [leg.marketApiKey] : resolveMarketApiKeys(leg.market);
+  const selection = leg.selection.toLowerCase();
+  const firstWord = selection.split(" ")[0];
+
+  for (const market of bookmaker.markets ?? []) {
+    if (allowedMarketKeys.length > 0 && !allowedMarketKeys.includes(market.key)) continue;
+    for (const outcome of market.outcomes ?? []) {
+      if (!outcome?.name || !outcome?.price || outcome.price <= 0) continue;
+      if (leg.point !== undefined && (outcome.point === undefined || Math.abs(outcome.point - leg.point) >= 0.001)) continue;
+      const candidateNames = [outcome.name, outcome.description]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => value.toLowerCase());
+      const nameMatches = candidateNames.some((candidate) =>
+        candidate === selection || candidate.includes(selection) || selection.includes(candidate) ||
+        (market.key === "h2h" && (candidate.includes(firstWord) || selection.includes(candidate.split(" ")[0])))
+      );
+      if (nameMatches) return { market, outcome };
+    }
+  }
   return null;
+}
+
+function getNativeBookmakerLink(bookmaker: OddsApiBookmaker | undefined, legs: Leg[]): string | null {
+  if (!bookmaker) return null;
+  if (legs.length === 1) {
+    const selection = findBookmakerSelection(bookmaker, legs[0]);
+    const market = selection?.market;
+    const outcome = selection?.outcome;
+    const deepestLink = outcome?.link ?? market?.link ?? bookmaker.link;
+    if (deepestLink) return appendSourceIds(deepestLink, { eventSid: bookmaker.sid, marketSid: market?.sid, selectionSid: outcome?.sid });
+  }
+  const eventLink = bookmaker.link ?? (bookmaker.markets ?? []).find((market) => market?.link)?.link;
+  return eventLink ? appendSourceIds(eventLink, { eventSid: bookmaker.sid }) : null;
 }
 
 function detectFeatures(selection: string, market: string, operatorKey: string): string[] {
@@ -497,10 +714,10 @@ function buildBookmakerOdds(eventOdds: OddsApiEventOdds): BookmakerOdds[] {
     if (!bookmaker?.key) continue; const markets: BookmakerMarket[] = [];
     for (const market of bookmaker.markets ?? []) {
       if (!market?.key) continue; const outcomes: BookmakerOutcome[] = [];
-      for (const o of market.outcomes ?? []) { if (!o?.name || !o?.price || o.price <= 0) continue; outcomes.push({ name: o.name, price: o.price, point: o.point, link: o.link }); }
-      if (outcomes.length > 0) { markets.push({ key: market.key, outcomes, link: market.link }); }
+      for (const o of market.outcomes ?? []) { if (!o?.name || !o?.price || o.price <= 0) continue; outcomes.push({ name: o.name, description: o.description, price: o.price, point: o.point, link: o.link, sid: o.sid }); }
+      if (outcomes.length > 0) { markets.push({ key: market.key, outcomes, link: market.link, sid: market.sid }); }
     }
-    if (markets.length > 0) { result.push({ key: bookmaker.key, name: OPERATOR_NAMES[bookmaker.key] ?? bookmaker.title ?? bookmaker.key, markets, link: bookmaker.link }); }
+    if (markets.length > 0) { result.push({ key: bookmaker.key, name: OPERATOR_NAMES[bookmaker.key] ?? bookmaker.title ?? bookmaker.key, markets, link: bookmaker.link, sid: bookmaker.sid }); }
   }
   return result;
 }
@@ -513,7 +730,7 @@ function noOddsFoundResponse(): Response {
 }
 
 async function fetchSportOdds(sportKey: string, region: string, bookmakers: string): Promise<OddsApiEventOdds[]> {
-  const baseUrl = `${ODDS_API_BASE}/sports/${sportKey}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&bookmakers=${bookmakers}`;
+  const baseUrl = `${ODDS_API_BASE}/sports/${sportKey}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&includeSids=true&bookmakers=${bookmakers}`;
   const tryFetch = async (markets: string): Promise<OddsApiEventOdds[] | null> => {
     try {
       const res = await fetch(`${baseUrl}&markets=${markets}`);
@@ -623,12 +840,12 @@ async function fetchEventOdds(eventId: string, sportKey: string, region: string,
 
   const fetchBatch = async (markets: string[]): Promise<OddsApiEventOdds | null> => {
     // Use the main /odds/ endpoint with eventIds filter -- more reliable than the /events/{id}/odds/ endpoint
-    const url = `${ODDS_API_BASE}/sports/${sportKey}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&bookmakers=${bookmakers}&markets=${markets.join(",")}&eventIds=${eventId}`;
+    const url = `${ODDS_API_BASE}/sports/${sportKey}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&includeSids=true&bookmakers=${bookmakers}&markets=${markets.join(",")}&eventIds=${eventId}`;
     try {
       const res = await fetch(url);
       if (!res.ok) {
         // Fallback to per-event endpoint
-        const fallbackUrl = `${ODDS_API_BASE}/sports/${sportKey}/events/${eventId}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&bookmakers=${bookmakers}&markets=${markets.join(",")}`;
+        const fallbackUrl = `${ODDS_API_BASE}/sports/${sportKey}/events/${eventId}/odds/?apiKey=${API_KEY}&regions=${region}&oddsFormat=american&includeLinks=true&includeSids=true&bookmakers=${bookmakers}&markets=${markets.join(",")}`;
         const fallbackRes = await fetch(fallbackUrl);
         if (!fallbackRes.ok) { console.error(`EVENT ODDS BATCH ERROR: ${sportKey} event=${eventId} status=${res.status}/${fallbackRes.status}`); return null; }
         const fallbackData = await fallbackRes.json();
@@ -655,7 +872,7 @@ async function fetchEventOdds(eventId: string, sportKey: string, region: string,
 }
 
 async function fetchSpecificEvent(eventId: string, sportKey: string, region: string, bookmakers: string): Promise<{ eventOdds: OddsApiEventOdds; sport: SportMapping } | null> {
-  const sportMeta = SPORT_MAP.find((s) => s.key === sportKey) ?? { key: sportKey, sport: "Soccer", icon: "\u26bd", hints: [] };
+  const sportMeta = getSportMetadata(sportKey);
   const eventOdds = await fetchEventOdds(eventId, sportKey, region, bookmakers);
   if (eventOdds) return { eventOdds, sport: sportMeta };
   const events = await fetchSportOdds(sportKey, region, bookmakers);
@@ -676,24 +893,18 @@ function buildOperatorOffers(eventOdds: OddsApiEventOdds, legs: Leg[], cfg: { re
   for (const bookmakerKey of cfg.bookmakers ?? []) {
     const bookmaker = (eventOdds.bookmakers ?? []).find((b) => b?.key === bookmakerKey);
     const operatorName = OPERATOR_NAMES[bookmakerKey] ?? bookmakerKey;
-    const fallbackDeepLink = buildDeepLink(bookmakerKey, eventId, sportKey, region);
+    const sourceEventId = bookmaker?.sid != null ? String(bookmaker.sid) : eventId;
+    const fallbackDeepLink = buildDeepLink(bookmakerKey, sourceEventId, sportKey, region);
     if (!bookmaker) {
       operators.push({ key: bookmakerKey, name: operatorName, available: false, combinedOdds: null, deepLink: fallbackDeepLink, missingLegs: legs.map((l) => l.selection) }); continue;
     }
-    const nativeLink = region === "it" ? null : getNativeBookmakerLink(bookmaker, "h2h");
+    const nativeLink = getNativeBookmakerLink(bookmaker, legs);
     const deepLink = nativeLink ?? fallbackDeepLink;
     const legOdds: number[] = []; const missingLegs: string[] = [];
     for (const leg of legs) {
-      let found = false; const selectionLower = leg.selection.toLowerCase(); const firstWord = selectionLower.split(" ")[0];
-      for (const market of bookmaker?.markets ?? []) {
-        for (const outcome of market?.outcomes ?? []) {
-          if (!outcome?.name || !outcome?.price || outcome.price <= 0) continue;
-          const outcomeLower = outcome.name.toLowerCase();
-          if (outcomeLower === selectionLower || outcomeLower.includes(selectionLower) || selectionLower.includes(outcomeLower) || (market.key === "h2h" && (outcomeLower.includes(firstWord) || selectionLower.includes(outcomeLower.split(" ")[0])))) { legOdds.push(outcome.price); found = true; break; }
-        }
-        if (found) break;
-      }
-      if (!found) { missingLegs.push(leg.selection); }
+      const selection = findBookmakerSelection(bookmaker, leg);
+      if (selection) legOdds.push(selection.outcome.price);
+      else missingLegs.push(leg.selection);
     }
     if (missingLegs.length === 0 && legOdds.length === legs.length) { operators.push({ key: bookmakerKey, name: operatorName, available: true, combinedOdds: legOdds.reduce((acc, o) => acc * o, 1), deepLink, missingLegs: [] }); }
     else { operators.push({ key: bookmakerKey, name: operatorName, available: false, combinedOdds: null, deepLink, missingLegs }); }
@@ -704,6 +915,9 @@ function buildOperatorOffers(eventOdds: OddsApiEventOdds, legs: Leg[], cfg: { re
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") { return new Response(null, { status: 200, headers: corsHeaders }); }
   try {
+    if (!API_KEY) {
+      return new Response(JSON.stringify({ error: "Odds service is not configured." }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const body = await req.json().catch(() => ({})) as { prediction?: string; region?: string; oddsFormat?: string; eventId?: string; sportKey?: string; market?: string; };
     const prediction = body?.prediction ?? "";
     const region = (body?.region ?? "uk").toLowerCase();
@@ -716,8 +930,8 @@ Deno.serve(async (req: Request) => {
     if (selectedEventId && selectedSportKey) { const specific = await fetchSpecificEvent(selectedEventId, selectedSportKey, cfg.regions, bookmakerQuery); if (specific) { matchedEvent = specific.eventOdds; matchedSport = specific.sport; } }
     if (!matchedEvent) {
       if (!prediction) { return noOddsFoundResponse(); }
-      const candidateSports = SPORT_MAP.filter((s) => (s.hints || []).some((h) => text.includes(h)));
-      const sportsToSearch = candidateSports.length > 0 ? candidateSports : getSportsForRegion(region);
+      const sportsToSearch = await getSportsForPrediction(prediction, text, region);
+      if (sportsToSearch.length === 0) { return noOddsFoundResponse(); }
       const candidates = await fetchAndFindCandidates(text, cfg.regions, bookmakerQuery, sportsToSearch);
       if (candidates.length === 0) { return noOddsFoundResponse(); }
       const dualTeamCandidates = candidates.filter((c) => c.score === 2);
@@ -774,20 +988,25 @@ Deno.serve(async (req: Request) => {
     if (region === "it") { systemNotices.push("Avviso di Sistema: La normativa ADM vieta termini promozionali. Presentazione dei soli dati di quota neutrali."); }
     for (const requested of requestedLegs) {
       let bestMatch: { leg: Leg; operatorKey: string } | null = null; let anyOperatorHasIt = false;
-      const apiKeys = requested.marketApiKey ? [requested.marketApiKey] : resolveMarketApiKeys(requested.market);
       for (const bookmaker of matchedEvent.bookmakers ?? []) {
-        for (const market of bookmaker?.markets ?? []) {
-          if (apiKeys.length > 0 && !apiKeys.includes(market.key)) continue;
-          for (const outcome of market?.outcomes ?? []) {
-            if (!outcome?.name || !outcome?.price || outcome.price <= 0) continue;
-            const outcomeLower = outcome.name.toLowerCase(); const requestedLower = requested.selection.toLowerCase();
-            const nameMatches = outcomeLower === requestedLower || outcomeLower.includes(requestedLower) || requestedLower.includes(outcomeLower) || (market.key === "h2h" && (outcomeLower.includes(requestedLower.split(" ")[0]) || requestedLower.includes(outcomeLower.split(" ")[0])));
-            if (!nameMatches) continue;
-            if (requested.point !== undefined && outcome.point !== undefined) { if (Math.abs(outcome.point - requested.point) > 0.001) continue; }
-            if (requested.point !== undefined && outcome.point === undefined) continue;
-            anyOperatorHasIt = true;
-            if (!bestMatch || outcome.price > bestMatch.leg.odds) { const features = detectFeatures(requested.selection, market.key, bookmaker.key); bestMatch = { leg: { id: `leg-${legs.length + 1}`, selection: requested.selection, market: requested.market, marketApiKey: market.key, point: requested.point, odds: outcome.price, result: "Pending", features }, operatorKey: bookmaker.key }; }
-          }
+        const selection = findBookmakerSelection(bookmaker, {
+          id: "lookup",
+          selection: requested.selection,
+          market: requested.market,
+          marketApiKey: requested.marketApiKey,
+          point: requested.point,
+          odds: 0,
+          result: "Pending",
+          features: [],
+        });
+        if (!selection) continue;
+        anyOperatorHasIt = true;
+        if (!bestMatch || selection.outcome.price > bestMatch.leg.odds) {
+          const features = detectFeatures(requested.selection, selection.market.key, bookmaker.key);
+          bestMatch = {
+            leg: { id: `leg-${legs.length + 1}`, selection: requested.selection, market: requested.market, marketApiKey: selection.market.key, point: requested.point, odds: selection.outcome.price, result: "Pending", features },
+            operatorKey: bookmaker.key,
+          };
         }
       }
       if (bestMatch) { legs.push(bestMatch.leg); } else { hasMissingLeg = true; if (!anyOperatorHasIt) { systemNotices.push(`System Notice: The requested market "${requested.selection}" is currently unavailable or unlisted by operators for this fixture. Please select an active market line.`); } }

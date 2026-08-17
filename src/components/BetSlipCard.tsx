@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Wifi, AlertCircle, ArrowRight, ArrowUpRight, Layers, Trophy, Clock, Loader2, Crown, Eye, EyeOff, SlidersHorizontal, CircleDot, Dribbble, Circle, Disc, Target, Flag, Swords, Gauge, Shield, Gamepad2, Tv, Clapperboard, Music, Landmark, TrendingUp, Zap } from 'lucide-react';
-import type { BetSlip, Region, Language, OddsFormat, OperatorOffer, CandidateFixture, BookmakerOdds } from '../constants';
+import type { BetSlip, Region, Language, OddsFormat, OperatorOffer, CandidateFixture, BookmakerOdds, BookmakerOutcome } from '../constants';
 import { REGION_CONFIG, DIALECT } from '../constants';
 import { formatOdds } from '../utils/odds';
 import { EventHeaderCard } from './EventHeaderCard';
@@ -343,6 +343,11 @@ function buildMarketPills(slip: BetSlip, strings: typeof DIALECT[Region][Languag
   return pills;
 }
 
+function getOutcomeDisplayName(outcome: BookmakerOutcome): string {
+  const selection = outcome.description ? `${outcome.description} ${outcome.name}` : outcome.name;
+  return outcome.point !== undefined ? `${selection} ${outcome.point}` : selection;
+}
+
 function getOutcomesForMarket(marketKey: string, bookmakerOdds: BookmakerOdds[]): string[] {
   const seen = new Set<string>();
   const outcomes: string[] = [];
@@ -350,7 +355,7 @@ function getOutcomesForMarket(marketKey: string, bookmakerOdds: BookmakerOdds[])
     const market = bm.markets.find((m) => m.key === marketKey);
     if (!market) continue;
     for (const o of market.outcomes) {
-      const displayName = o.point !== undefined ? `${o.name} ${o.point}` : o.name;
+      const displayName = getOutcomeDisplayName(o);
       if (!seen.has(displayName)) {
         seen.add(displayName);
         outcomes.push(displayName);
@@ -368,8 +373,7 @@ function findOutcomePrice(
   const market = bookmaker.markets.find((m) => m.key === marketKey);
   if (!market) return null;
   let outcome = market.outcomes.find((o) => {
-    const displayName = o.point !== undefined ? `${o.name} ${o.point}` : o.name;
-    return displayName === outcomeName;
+    return getOutcomeDisplayName(o) === outcomeName;
   });
   if (!outcome) {
     outcome = market.outcomes.find((o) => o.name === outcomeName);
@@ -386,13 +390,39 @@ function resolveDeepLink(
 ): string {
   const market = bookmaker.markets.find((m) => m.key === marketKey);
   const outcome = market?.outcomes.find((o) => {
-    const displayName = o.point !== undefined ? `${o.name} ${o.point}` : o.name;
-    return displayName === outcomeName || o.name === outcomeName;
+    return getOutcomeDisplayName(o) === outcomeName || o.name === outcomeName;
   });
-  if (outcome?.link) return outcome.link;
-  if (market?.link) return market.link;
-  if (bookmaker.link) return bookmaker.link;
-  return fallbackLink;
+  const deepestLink = outcome?.link ?? market?.link ?? bookmaker.link ?? fallbackLink;
+  if (!deepestLink) return '';
+  try {
+    const url = new URL(deepestLink);
+    if (bookmaker.sid != null && !url.searchParams.has('eventId')) {
+      url.searchParams.set('eventId', String(bookmaker.sid));
+    }
+    if (market?.sid != null && !url.searchParams.has('marketId')) {
+      url.searchParams.set('marketId', String(market.sid));
+    }
+    if (
+      outcome?.sid != null &&
+      !url.searchParams.has('selectionId') &&
+      !url.searchParams.has('outcomeId')
+    ) {
+      url.searchParams.set('selectionId', String(outcome.sid));
+    }
+    return url.toString();
+  } catch {
+    return deepestLink;
+  }
+}
+
+function getSafeTransferLink(deepLink: string): string | null {
+  if (!deepLink || deepLink === '#') return null;
+  try {
+    const url = new URL(deepLink);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatChange, onSelectFixture, onSelectMarket }: BetSlipCardProps) {
@@ -499,24 +529,28 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
   });
 
   const handleTransfer = (deepLink: string, name: string) => {
+    const transferLink = getSafeTransferLink(deepLink);
+    if (!transferLink) return;
     setTransferring(name);
     setShowOverlay(true);
     const summary = `${selectedOutcome || slip.legs.map((l) => l.selection).join(' | ')} @ ${bestPrice || serverBestOdds}`;
     try { navigator.clipboard?.writeText(summary); } catch { /* noop */ }
     setTimeout(() => {
-      window.open(deepLink, '_blank', 'noopener,noreferrer');
+      window.open(transferLink, '_blank', 'noopener,noreferrer');
       setShowOverlay(false);
       setTimeout(() => setTransferring(null), 2000);
     }, 1200);
   };
 
   const handleServerTransfer = (operator: OperatorOffer) => {
+    const transferLink = getSafeTransferLink(operator.deepLink);
+    if (!transferLink) return;
     setTransferring(operator.name);
     setShowOverlay(true);
     const summary = slip.legs.map((l) => `${l.selection} @ ${l.odds}`).join(' | ');
     try { navigator.clipboard?.writeText(summary); } catch { /* noop */ }
     setTimeout(() => {
-      window.open(operator.deepLink, '_blank', 'noopener,noreferrer');
+      window.open(transferLink, '_blank', 'noopener,noreferrer');
       setShowOverlay(false);
       setTimeout(() => setTransferring(null), 2000);
     }, 1200);

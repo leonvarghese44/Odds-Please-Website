@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const API_KEY = import.meta.env.VITE_ODDS_API_KEY || 'ccb5cfa1c1d8909e7668399923bbec06';
-const BASE_URL = 'https://api.the-odds-api.com/v4/sports';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const CACHE_TTL = 3 * 60 * 1000;
 
 export interface Outcome {
   name: string;
+  description?: string;
   price: number;
+  point?: number;
   link?: string;
+  sid?: string | number | null;
 }
 
 export interface Market {
@@ -15,6 +18,7 @@ export interface Market {
   last_update: number | string;
   outcomes: Outcome[];
   link?: string;
+  sid?: string | number | null;
 }
 
 export interface Bookmaker {
@@ -23,6 +27,7 @@ export interface Bookmaker {
   last_update: number | string;
   markets: Market[];
   link?: string;
+  sid?: string | number | null;
 }
 
 export interface OddsEvent {
@@ -66,8 +71,23 @@ export function useOddsData(sportKey = 'upcoming', region = 'uk') {
     }
 
     try {
+      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+        throw new Error('Supabase is not configured.');
+      }
+      const markets = sportKey.startsWith('soccer')
+        ? 'h2h,totals,btts'
+        : sportKey === 'upcoming'
+          ? 'h2h'
+          : 'h2h,spreads,totals';
+      const query = new URLSearchParams({
+        sportKey,
+        regions: region,
+        markets,
+        oddsFormat: 'decimal',
+      });
       const response = await fetch(
-        `${BASE_URL}/${sportKey}/odds/?apiKey=${API_KEY}&regions=${region}&markets=h2h,totals,btts&oddsFormat=decimal&includeLinks=true`,
+        `${SUPABASE_URL}/functions/v1/odds-proxy?${query.toString()}`,
+        { headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` } },
       );
 
       if (!response.ok) {

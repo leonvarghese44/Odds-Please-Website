@@ -32,15 +32,18 @@ export interface MarketOption {
 
 export interface BookmakerOutcome {
   name: string;
+  description?: string;
   price: number;
   point?: number;
   link?: string;
+  sid?: string | number | null;
 }
 
 export interface BookmakerMarket {
   key: string;
   outcomes: BookmakerOutcome[];
   link?: string;
+  sid?: string | number | null;
 }
 
 export interface BookmakerOdds {
@@ -48,6 +51,7 @@ export interface BookmakerOdds {
   name: string;
   markets: BookmakerMarket[];
   link?: string;
+  sid?: string | number | null;
 }
 
 export interface CandidateFixture {
