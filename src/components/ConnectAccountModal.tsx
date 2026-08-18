@@ -15,7 +15,7 @@ const OPERATOR_ROWS: OperatorRow[] = [
   { name: 'Sky Bet', region: 'UK', currency: '£', balance: 15.0, connected: true },
   { name: 'Betfair', region: 'UK', currency: '£', balance: 10.0, connected: true },
   { name: 'Paddy Power', region: 'UK/IE', currency: '£', balance: 5.0, connected: true },
-  { name: 'Sisal', region: 'IT', currency: '€', balance: 0, connected: false },
+  { name: 'Codere', region: 'IT', currency: '€', balance: 0, connected: false },
   { name: 'Bet365', region: 'UK', currency: '£', balance: 0, connected: false, competitor: true },
   { name: 'William Hill', region: 'UK', currency: '£', balance: 0, connected: false, competitor: true },
 ];

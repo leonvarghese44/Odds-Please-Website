@@ -12,6 +12,7 @@ const API_KEY = Deno.env.get("ODDS_API_KEY") ?? "";
 const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") ?? "";
 const SPORT_CLASSIFIER_MODEL = Deno.env.get("SPORT_CLASSIFIER_MODEL") ?? "gpt-5.4-nano";
 const ATP_SPORT_KEY = "tennis_atp";
+const EVENT_MARKET_CACHE_TTL_MS = 60_000;
 
 interface SportMapping {
   key: string;
@@ -358,6 +359,10 @@ interface OddsApiOutcome { name: string; description?: string; price: number; po
 interface OddsApiMarket { key: string; outcomes: OddsApiOutcome[]; description?: string; link?: string; sid?: string | number | null; }
 interface OddsApiBookmaker { key: string; title: string; link?: string; sid?: string | number | null; markets: OddsApiMarket[]; }
 interface OddsApiEventOdds { id: string; sport_key: string; commence_time: string; home_team: string; away_team: string; bookmakers: OddsApiBookmaker[]; }
+interface OddsApiEventMarketIndex { bookmakers?: Array<{ markets?: Array<{ key?: string }> }>; }
+
+const eventMarketKeysCache = new Map<string, { expiresAt: number; keys: string[] }>();
+const eventOddsCache = new Map<string, { expiresAt: number; event: OddsApiEventOdds }>();
 
 interface Leg { id: string; selection: string; market: string; marketApiKey?: string; point?: number; odds: number; result: string; features: string[]; prevOdds?: number; }
 interface MarketOption { market: string; label: string; outcomes: { name: string; price: number; point?: number }[]; apiKey?: string; }
@@ -565,8 +570,6 @@ const MARKET_LABEL_TO_API_KEYS: Record<string, string[]> = {
 
 function resolveMarketApiKeys(marketLabel: string): string[] { return MARKET_LABEL_TO_API_KEYS[marketLabel] ?? []; }
 
-const FEATURED_MARKET_KEYS = new Set(["h2h", "spreads", "totals", "outrights"]);
-
 function getRequestedMarketKeys(requestedLegs: RequestedLeg[], selectedMarket?: string): string[] {
   const keys = selectedMarket
     ? [selectedMarket]
@@ -580,12 +583,13 @@ function eventHasMarket(event: OddsApiEventOdds, marketKey: string): boolean {
   );
 }
 
-function getEventEndpointMarkets(event: OddsApiEventOdds, requestedMarketKeys: string[]): string[] {
-  const nonFeatured = requestedMarketKeys.filter((marketKey) => !FEATURED_MARKET_KEYS.has(marketKey));
-  const missingFeatured = requestedMarketKeys.filter((marketKey) =>
-    FEATURED_MARKET_KEYS.has(marketKey) && !eventHasMarket(event, marketKey)
-  );
-  return [...new Set([...nonFeatured, ...missingFeatured])];
+function getEventEndpointMarkets(
+  event: OddsApiEventOdds,
+  requestedMarketKeys: string[],
+  availableMarketKeys: string[],
+): string[] {
+  return [...new Set([...requestedMarketKeys, ...availableMarketKeys])]
+    .filter((marketKey) => !eventHasMarket(event, marketKey));
 }
 
 function parseRequestedLegs(text: string, event: OddsApiEventOdds): RequestedLeg[] {
@@ -804,9 +808,63 @@ function mergeBookmakers(base: OddsApiEventOdds, extra: OddsApiEventOdds): void 
   }
 }
 
+function getEventDataCacheKey(eventId: string, sportKey: string, region: string, bookmakers: string): string {
+  return `${sportKey}|${eventId}|${region}|${bookmakers}`;
+}
+
+async function fetchAvailableEventMarketKeys(
+  eventId: string,
+  sportKey: string,
+  region: string,
+  bookmakers: string,
+): Promise<string[]> {
+  const cacheKey = getEventDataCacheKey(eventId, sportKey, region, bookmakers);
+  const cached = eventMarketKeysCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return [...cached.keys];
+  if (cached) eventMarketKeysCache.delete(cacheKey);
+
+  const query = new URLSearchParams({ apiKey: API_KEY, regions: region });
+  if (bookmakers) query.set("bookmakers", bookmakers);
+  const url = `${ODDS_API_BASE}/sports/${encodeURIComponent(sportKey)}/events/${encodeURIComponent(eventId)}/markets?${query.toString()}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`EVENT MARKETS ERROR: ${sportKey} event=${eventId} status=${response.status}`);
+      return [];
+    }
+
+    const data = await response.json() as OddsApiEventMarketIndex;
+    const seen = new Set<string>();
+    const marketKeys: string[] = [];
+    for (const bookmaker of data?.bookmakers ?? []) {
+      for (const market of bookmaker?.markets ?? []) {
+        const key = market?.key?.trim();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        marketKeys.push(key);
+      }
+    }
+
+    eventMarketKeysCache.set(cacheKey, {
+      expiresAt: Date.now() + EVENT_MARKET_CACHE_TTL_MS,
+      keys: marketKeys,
+    });
+    return marketKeys;
+  } catch (err) {
+    console.error(`EVENT MARKETS ERROR: ${sportKey} event=${eventId}`, err);
+    return [];
+  }
+}
+
 async function fetchEventOdds(eventId: string, sportKey: string, region: string, bookmakers: string, markets: string[]): Promise<OddsApiEventOdds | null> {
   const requestedMarkets = [...new Set(markets.filter(Boolean))];
   if (requestedMarkets.length === 0) return null;
+
+  const cacheKey = `${getEventDataCacheKey(eventId, sportKey, region, bookmakers)}|${[...requestedMarkets].sort().join(",")}`;
+  const cached = eventOddsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.event;
+  if (cached) eventOddsCache.delete(cacheKey);
 
   const query = new URLSearchParams({
     apiKey: API_KEY,
@@ -827,7 +885,14 @@ async function fetchEventOdds(eventId: string, sportKey: string, region: string,
     }
     const data = await response.json();
     if (!data || data.id !== eventId) return null;
-    return convertOddsToDecimal([data])[0] ?? null;
+    const event = convertOddsToDecimal([data])[0] ?? null;
+    if (event) {
+      eventOddsCache.set(cacheKey, {
+        expiresAt: Date.now() + EVENT_MARKET_CACHE_TTL_MS,
+        event,
+      });
+    }
+    return event;
   } catch (err) {
     console.error(`EVENT ODDS ERROR: ${sportKey} event=${eventId} markets=${requestedMarkets.join(",")}`, err);
     return null;
@@ -909,7 +974,17 @@ Deno.serve(async (req: Request) => {
     const fixtureOnly = isFixtureOnlyPrompt(text, matchedEvent);
     const requestedLegs = fixtureOnly || selectedMarket ? [] : parseRequestedLegs(text, matchedEvent);
     const requestedMarketKeys = getRequestedMarketKeys(requestedLegs, selectedMarket);
-    const eventEndpointMarkets = getEventEndpointMarkets(matchedEvent, requestedMarketKeys);
+    const availableEventMarketKeys = await fetchAvailableEventMarketKeys(
+      matchedEvent.id,
+      matchedSport.key,
+      cfg.regions,
+      bookmakerQuery,
+    );
+    const eventEndpointMarkets = getEventEndpointMarkets(
+      matchedEvent,
+      requestedMarketKeys,
+      availableEventMarketKeys,
+    );
 
     if (eventEndpointMarkets.length > 0) {
       const enriched = await fetchEventOdds(

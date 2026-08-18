@@ -56,8 +56,8 @@ export function HeaderNav({
 
   const regions: { code: Region; flag: string; label: string; books: string }[] = [
     { code: 'UK', flag: '🇬🇧', label: 'UK (£)', books: 'Sky Bet, Betfair, Paddy Power' },
-    { code: 'US', flag: '🇺🇸', label: 'US ($)', books: 'FanDuel, DraftKings, BetMGM' },
-    { code: 'IT', flag: '🇮🇹', label: 'IT (€)', books: 'Sisal, Betfair, Paddy Power' },
+    { code: 'US', flag: '🇺🇸', label: 'US ($)', books: 'FanDuel, DraftKings' },
+    { code: 'IT', flag: '🇮🇹', label: 'IT (€)', books: 'Codere, Unibet, Betfair' },
   ];
 
   const formats: { code: OddsFormat; label: string }[] = [

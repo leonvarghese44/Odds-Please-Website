@@ -94,6 +94,7 @@ export function AppRouter() {
               path="/"
               element={
                 <App
+                  key={region}
                   region={region}
                   language={language}
                   oddsFormat={oddsFormat}

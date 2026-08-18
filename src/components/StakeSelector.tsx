@@ -9,9 +9,23 @@ interface StakeSelectorProps {
   operators: OperatorOffer[];
   totalOdds: number;
   onStakeChange: (stake: number) => void;
+  operatorOptions?: { key: string; name: string }[];
+  selectedOperatorKey?: string;
+  onOperatorChange?: (operatorKey: string) => void;
+  isBestPriceSelected?: boolean;
 }
 
-export function StakeSelector({ region, oddsFormat, operators, totalOdds, onStakeChange }: StakeSelectorProps) {
+export function StakeSelector({
+  region,
+  oddsFormat,
+  operators,
+  totalOdds,
+  onStakeChange,
+  operatorOptions = [],
+  selectedOperatorKey,
+  onOperatorChange,
+  isBestPriceSelected = true,
+}: StakeSelectorProps) {
   const cfg = REGION_CONFIG[region];
   const [stake, setStake] = useState(cfg.defaultStake);
   const sym = cfg.currencySymbol;
@@ -19,6 +33,10 @@ export function StakeSelector({ region, oddsFormat, operators, totalOdds, onStak
   const bestOp = operators.find((o) => o.available && o.combinedOdds);
   const bestOdds = totalOdds || bestOp?.combinedOdds || 0;
   const potentialReturn = (stake * bestOdds).toFixed(2);
+  const selectedOperatorName = operatorOptions.find((operator) => operator.key === selectedOperatorKey)?.name ?? bestOp?.name;
+  const oddsLabel = isBestPriceSelected
+    ? region === 'IT' ? 'Miglior Quota' : 'Best Market Odds'
+    : region === 'IT' ? 'Quota Selezionata' : 'Selected Odds';
 
   const handleStakeChange = (val: number) => {
     setStake(val);
@@ -32,13 +50,28 @@ export function StakeSelector({ region, oddsFormat, operators, totalOdds, onStak
           <span className="block text-xs font-medium text-zinc-400">
             {region === 'IT' ? 'Puntata Selezionata' : 'Selected Wager'}
           </span>
-          <span className="text-lg font-bold text-white">
-            {bestOp?.name ?? (region === 'IT' ? 'Miglior Quota' : 'Best Market Odds')}
-          </span>
+          {operatorOptions.length > 1 && selectedOperatorKey && onOperatorChange ? (
+            <select
+              aria-label="Selected wager bookmaker"
+              value={selectedOperatorKey}
+              onChange={(event) => onOperatorChange(event.target.value)}
+              className="block max-w-[220px] cursor-pointer bg-transparent text-lg font-bold text-white outline-none"
+            >
+              {operatorOptions.map((operator) => (
+                <option key={operator.key} value={operator.key} className="bg-zinc-950 text-white">
+                  {operator.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-lg font-bold text-white">
+              {selectedOperatorName ?? (region === 'IT' ? 'Miglior Quota' : 'Best Market Odds')}
+            </span>
+          )}
         </div>
         <div className="text-right">
           <span className="block text-xs font-medium text-zinc-400">
-            {region === 'IT' ? 'Miglior Quota' : 'Best Market Odds'}
+            {oddsLabel}
           </span>
           <span className="text-2xl font-bold tabular-nums text-emerald-400">
             {bestOdds > 0 ? formatOdds(bestOdds, oddsFormat) : '\u2014'}
