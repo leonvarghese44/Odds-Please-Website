@@ -31,7 +31,7 @@
     @apply font-sans;
   }
   /* Ensure small text is crisp and legible on dark backgrounds */
-  .text-xs, .text-sm, .text-[11px], .text-[12px], .text-[13px], .text-[14px] {
+  .text-xs, .text-sm, .text-\[11px\], .text-\[12px\], .text-\[13px\], .text-\[14px\] {
     line-height: 1.5;
   }
 }

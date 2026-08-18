@@ -332,7 +332,7 @@ function buildMarketPills(slip: BetSlip, strings: typeof DIALECT[Region][Languag
   for (const bm of bookmakerOdds) {
     for (const market of bm.markets) {
       if (seen.has(market.key)) continue;
-      if (market.key.includes('lay')) continue;
+      if (market.key.endsWith('_lay')) continue;
       if (dupes.has(market.key)) continue;
       seen.add(market.key);
       const labelFn = MARKET_LABELS[market.key];
@@ -346,6 +346,14 @@ function buildMarketPills(slip: BetSlip, strings: typeof DIALECT[Region][Languag
 function getOutcomeDisplayName(outcome: BookmakerOutcome): string {
   const selection = outcome.description ? `${outcome.description} ${outcome.name}` : outcome.name;
   return outcome.point !== undefined ? `${selection} ${outcome.point}` : selection;
+}
+
+function normalizeOutcomeMatchText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\b(goals?|points?|yards?|rebounds?|assists?|touchdowns?|tds?|runs?|hits?|strikeouts?|saves?)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function getOutcomesForMarket(marketKey: string, bookmakerOdds: BookmakerOdds[]): string[] {
@@ -436,6 +444,7 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
   const [stake, setStake] = useState(cfg.defaultStake);
   const [hiddenBooks, setHiddenBooks] = useState<Set<string>>(new Set());
   const [showBookFilter, setShowBookFilter] = useState(false);
+  const [selectedBookmakerKey, setSelectedBookmakerKey] = useState<string | null>(null);
 
   const bookmakerOdds = slip.bookmakerOdds ?? [];
   const marketPills = buildMarketPills(slip, strings, bookmakerOdds);
@@ -467,17 +476,21 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
     const legPoint = slip.legs[0]?.point;
     let preferred: string | undefined;
     if (legSelection) {
+      const normalizedLegSelection = normalizeOutcomeMatchText(legSelection);
+      preferred = outcomes.find((name) => normalizeOutcomeMatchText(name) === normalizedLegSelection);
       if (legPoint !== undefined) {
-        preferred = outcomes.find((name) =>
-          name.toLowerCase().includes(legSelection.toLowerCase()) && name.includes(String(legPoint)),
-        );
-      } else {
-        preferred = outcomes.find((name) => name === legSelection || name.toLowerCase() === legSelection.toLowerCase());
+        preferred ??= outcomes.find((name) => {
+          const normalizedName = normalizeOutcomeMatchText(name);
+          return name.includes(String(legPoint)) && (
+            normalizedName.includes(normalizedLegSelection) ||
+            normalizedLegSelection.includes(normalizedName)
+          );
+        });
       }
       if (!preferred) {
         preferred = outcomes.find((name) =>
-          name.toLowerCase().includes(legSelection.toLowerCase()) ||
-          legSelection.toLowerCase().includes(name.toLowerCase()),
+          normalizeOutcomeMatchText(name).includes(normalizedLegSelection) ||
+          normalizedLegSelection.includes(normalizeOutcomeMatchText(name)),
         );
       }
     }
@@ -505,35 +518,48 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
       .sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
   }, [bookmakerOdds, activeMarket, selectedOutcome, hasBookmakerOdds, hiddenBooks]);
 
+  useEffect(() => {
+    setSelectedBookmakerKey(null);
+  }, [slip.eventId, activeMarket, selectedOutcome]);
+
+  useEffect(() => {
+    if (
+      selectedBookmakerKey &&
+      !brandComparison.some((brand) => brand.key === selectedBookmakerKey && brand.price !== null)
+    ) {
+      setSelectedBookmakerKey(null);
+    }
+  }, [brandComparison, selectedBookmakerKey]);
+
   const bestBrand = brandComparison.find((b) => b.price !== null);
   const bestPrice = bestBrand?.price ?? 0;
-  const totalOdds = bestPrice;
+  const selectedBrand = brandComparison.find((brand) => brand.key === selectedBookmakerKey && brand.price !== null) ?? bestBrand;
+  const selectedPrice = selectedBrand?.price ?? bestPrice;
+  const totalOdds = selectedPrice;
   const prob = totalOdds > 0 ? (1 / totalOdds) * 100 : 0;
   const hasOdds = totalOdds > 0;
   const sym = cfg.currencySymbol;
-  const bestReturn = stake * totalOdds;
+  const bookmakerOptions = brandComparison
+    .filter((brand) => brand.price !== null)
+    .map((brand) => ({ key: brand.key, name: brand.name }));
 
   const availableOperators = (slip.operators || []).filter((o) => o.available && o.combinedOdds && !hiddenBooks.has(o.key));
   const sortedOps = [...availableOperators].sort((a, b) => (b.combinedOdds ?? 0) - (a.combinedOdds ?? 0));
   const bestOp = sortedOps[0];
-  const lowestOp = sortedOps[sortedOps.length - 1];
-  const serverBestOdds = bestOp?.combinedOdds ?? 0;
   const serverProb = slip.totalOdds > 0 ? slip.probability : 0;
   const serverHasOdds = slip.totalOdds > 0;
-  const lowestReturn = stake * (lowestOp?.combinedOdds ?? 0);
-  const delta = bestReturn - lowestReturn;
 
   const visibleNotices = (slip.systemNotices || []).filter((notice) => {
     if (notice.includes('currently unlisted') && availableOperators.length > 0) return false;
     return true;
   });
 
-  const handleTransfer = (deepLink: string, name: string) => {
+  const handleTransfer = (deepLink: string, name: string, price: number) => {
     const transferLink = getSafeTransferLink(deepLink);
     if (!transferLink) return;
     setTransferring(name);
     setShowOverlay(true);
-    const summary = `${selectedOutcome || slip.legs.map((l) => l.selection).join(' | ')} @ ${bestPrice || serverBestOdds}`;
+    const summary = `${selectedOutcome || slip.legs.map((l) => l.selection).join(' | ')} @ ${price}`;
     try { navigator.clipboard?.writeText(summary); } catch { /* noop */ }
     setTimeout(() => {
       window.open(transferLink, '_blank', 'noopener,noreferrer');
@@ -554,6 +580,14 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
       setShowOverlay(false);
       setTimeout(() => setTransferring(null), 2000);
     }, 1200);
+  };
+
+  const handlePrimaryTransfer = () => {
+    if (selectedBrand?.price !== null && selectedBrand?.price !== undefined) {
+      handleTransfer(selectedBrand.deepLink, selectedBrand.name, selectedBrand.price);
+      return;
+    }
+    if (bestOp) handleServerTransfer(bestOp);
   };
 
   const outcomeNames = getOutcomesForMarket(activeMarket, bookmakerOdds);
@@ -762,6 +796,10 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
           operators={slip.operators}
           totalOdds={totalOdds}
           onStakeChange={setStake}
+          operatorOptions={bookmakerOptions}
+          selectedOperatorKey={selectedBrand?.key}
+          onOperatorChange={setSelectedBookmakerKey}
+          isBestPriceSelected={selectedBrand?.key === bestBrand?.key}
         />
       ) : availableOperators.length > 0 ? (
         <StakeSelector
@@ -823,7 +861,13 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
             {bestBrand && bestBrand.price !== null && (
               <div className="rounded-2xl border-2 border-emerald-500/80 bg-black p-5 glow-emerald-card">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBookmakerKey(bestBrand.key)}
+                    aria-label={`Select ${bestBrand.name} as wager bookmaker`}
+                    aria-pressed={selectedBrand?.key === bestBrand.key}
+                    className="flex items-center gap-2.5 text-left"
+                  >
                     <OperatorLogo operatorKey={bestBrand.key} name={bestBrand.name} />
                     <div>
                       <div className="flex items-center gap-1.5">
@@ -842,9 +886,9 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
                         </span>
                       </div>
                     </div>
-                  </div>
+                  </button>
                   <button
-                    onClick={() => handleTransfer(bestBrand.deepLink, bestBrand.name)}
+                    onClick={() => handleTransfer(bestBrand.deepLink, bestBrand.name, bestBrand.price!)}
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-6 py-3.5 text-xs font-bold text-black shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 active:scale-95 sm:text-sm"
                   >
                     {strings.transferSlip}
@@ -861,13 +905,27 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
               .map((brand) => {
                 const shift = priceShifts[brand.key];
                 const hasPrice = brand.price !== null;
+                const isSelectedBookmaker = selectedBrand?.key === brand.key;
                 return (
                   <div
                     key={brand.key}
-                    className={`rounded-xl border p-4 transition ${hasPrice ? 'border-zinc-800 bg-black hover:border-zinc-700' : 'border-zinc-800/50 bg-black/20 opacity-50'}`}
+                    className={`rounded-xl border p-4 transition ${
+                      !hasPrice
+                        ? 'border-zinc-800/50 bg-black/20 opacity-50'
+                        : isSelectedBookmaker
+                          ? 'border-emerald-500/80 bg-emerald-500/5 shadow-[0_0_12px_rgba(16,185,129,0.12)]'
+                          : 'border-zinc-800 bg-black hover:border-zinc-700'
+                    }`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => hasPrice && setSelectedBookmakerKey(brand.key)}
+                        disabled={!hasPrice}
+                        aria-label={`Select ${brand.name} as wager bookmaker`}
+                        aria-pressed={isSelectedBookmaker}
+                        className="flex items-center gap-3 text-left disabled:cursor-not-allowed"
+                      >
                         <OperatorLogo operatorKey={brand.key} name={brand.name} />
                         <div>
                           <span className="text-sm font-semibold text-white block">{brand.name}</span>
@@ -885,9 +943,9 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
                             </span>
                           </div>
                         </div>
-                      </div>
+                      </button>
                       <button
-                        onClick={() => hasPrice && handleTransfer(brand.deepLink, brand.name)}
+                        onClick={() => hasPrice && handleTransfer(brand.deepLink, brand.name, brand.price!)}
                         disabled={!hasPrice}
                         className="inline-flex items-center gap-1.5 rounded-xl bg-zinc-800 px-4 py-2.5 text-xs font-bold text-zinc-300 border border-zinc-700 transition hover:bg-zinc-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                       >
@@ -946,10 +1004,10 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
       {(hasBookmakerOdds ? brandComparison.length > 0 : availableOperators.length > 0) && (
         <div className="p-5 pt-4">
           <button
-            onClick={() => bestBrand && handleTransfer(bestBrand.deepLink, bestBrand.name)}
+            onClick={handlePrimaryTransfer}
             className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 py-4 text-base font-bold text-black shadow-xl shadow-emerald-500/20 transition hover:bg-emerald-400 active:scale-[0.99] sm:text-lg"
           >
-            {strings.transferCtaOperator(bestBrand?.name ?? bestOp?.name ?? 'Operator')}
+            {strings.transferCtaOperator(selectedBrand?.name ?? bestOp?.name ?? 'Operator')}
             <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
           </button>
         </div>

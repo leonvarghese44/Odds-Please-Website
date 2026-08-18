@@ -32,7 +32,7 @@ export const SignedOutHeroBanner: React.FC<SignedOutHeroBannerProps> = ({
       badge: '%C ODDS CLUB',
       titleFirst: 'Iscrizione Istantanea.',
       titleSecond: 'Premi Istantanei.',
-      subtext: 'Spin giornalieri + collega Sisal, Betfair & Paddy Power in un solo posto.',
+      subtext: 'Spin giornalieri + collega Codere, Unibet & Betfair in un solo posto.',
       ctaPrimary: 'Entra in Odds Club',
       ctaSecondary: 'Sei già iscritto?',
     },
