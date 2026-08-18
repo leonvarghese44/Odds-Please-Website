@@ -102,7 +102,7 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         if (res.status === 404) {
-          throw new Error('No odds found for this prediction.');
+          throw new Error(errBody?.error || 'No odds found for this prediction.');
         }
         throw new Error(errBody?.error || `Request failed: ${res.status}`);
       }
