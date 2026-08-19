@@ -8,6 +8,15 @@ interface PlayerIdentityHint {
 }
 
 const GENERIC_PLAYER_OUTCOME_NAMES = new Set(["yes", "no", "over", "under", "score"]);
+const IDENTITY_ONLY_SCORER_MARKETS = new Set([
+  "player_goal_scorer_anytime",
+  "player_goal_scorer_first",
+  "player_first_goal_scorer",
+  "player_anytime_goal",
+  "player_first_goal",
+  "player_anytime_td",
+  "player_1st_td",
+]);
 
 function normalizePlayerIdentity(value: string): string {
   return value
@@ -93,6 +102,13 @@ export function findUnambiguousPlayerHint<T extends PlayerIdentityHint>(
   }
 
   return bestScore >= 0.72 && bestScore - secondScore >= 0.08 ? bestHint : null;
+}
+
+export function shouldMatchPlayerByIdentityOnly(
+  marketKey: string,
+  requestedOutcome: string,
+): boolean {
+  return IDENTITY_ONLY_SCORER_MARKETS.has(marketKey) && ["yes", "score"].includes(requestedOutcome.toLowerCase());
 }
 
 export function resolveCanonicalPlayerSelection(

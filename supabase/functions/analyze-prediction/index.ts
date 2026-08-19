@@ -4,6 +4,7 @@ import {
   findUnambiguousPlayerHint,
   playerNamesReferToSameEntity,
   resolveCanonicalPlayerSelection,
+  shouldMatchPlayerByIdentityOnly,
 } from "./player-resolution.ts";
 
 const corsHeaders = {
@@ -768,7 +769,8 @@ function findBookmakerSelection(
       if (!outcome?.name || !outcome?.price || outcome.price <= 0) continue;
       const pointDistance = leg.point !== undefined && outcome.point !== undefined ? Math.abs(outcome.point - leg.point) : 0;
       if (leg.point !== undefined && (outcome.point === undefined || pointDistance > 0.51)) continue;
-      if (requestedOutcome && requestedOutcome !== "unspecified" && requestedOutcome !== "score") {
+      const identityOnlyPlayerMatch = shouldMatchPlayerByIdentityOnly(market.key, requestedOutcome);
+      if (requestedOutcome && requestedOutcome !== "unspecified" && requestedOutcome !== "score" && !identityOnlyPlayerMatch) {
         const offeredOutcome = normalizeSearchValue(outcome.name);
         if (offeredOutcome !== requestedOutcome && !offeredOutcome.startsWith(`${requestedOutcome} `)) continue;
       }
