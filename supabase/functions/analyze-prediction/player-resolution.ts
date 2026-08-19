@@ -3,6 +3,10 @@ interface PlayerOutcomeIdentity {
   description?: string;
 }
 
+interface PlayerIdentityHint {
+  aliases: string[];
+}
+
 const GENERIC_PLAYER_OUTCOME_NAMES = new Set(["yes", "no", "over", "under", "score"]);
 
 function normalizePlayerIdentity(value: string): string {
@@ -67,6 +71,28 @@ export function playerNameSimilarity(enteredName: string, interpretedName: strin
 
 export function playerNamesReferToSameEntity(enteredName: string, interpretedName: string): boolean {
   return playerNameSimilarity(enteredName, interpretedName) >= 0.72;
+}
+
+export function findUnambiguousPlayerHint<T extends PlayerIdentityHint>(
+  enteredName: string,
+  hints: T[],
+): T | null {
+  let bestHint: T | null = null;
+  let bestScore = 0;
+  let secondScore = 0;
+
+  for (const hint of hints) {
+    const score = Math.max(0, ...hint.aliases.map((alias) => playerNameSimilarity(enteredName, alias)));
+    if (score > bestScore) {
+      secondScore = bestScore;
+      bestScore = score;
+      bestHint = hint;
+    } else if (score > secondScore) {
+      secondScore = score;
+    }
+  }
+
+  return bestScore >= 0.72 && bestScore - secondScore >= 0.08 ? bestHint : null;
 }
 
 export function resolveCanonicalPlayerSelection(

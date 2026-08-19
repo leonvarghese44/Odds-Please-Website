@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import {
   extractPlayerParticipantText,
-  playerNameSimilarity,
+  findUnambiguousPlayerHint,
   playerNamesReferToSameEntity,
   resolveCanonicalPlayerSelection,
 } from "./player-resolution.ts";
@@ -582,6 +582,27 @@ const PLAYER_SEARCH_HINTS: PlayerSearchHint[] = [
   { participant: "Nathan MacKinnon", aliases: ["mackinnon", "nathan mackinnon"], team: "Colorado Avalanche", sportKey: "icehockey_nhl" },
 ];
 
+function getPlayerSearchHint(prediction: string): PlayerSearchHint | null {
+  const participantText = extractPlayerParticipantText(prediction);
+  return participantText ? findUnambiguousPlayerHint(participantText, PLAYER_SEARCH_HINTS) : null;
+}
+
+function applyValidatedPlayerRoutingHint(
+  interpretation: QueryInterpretation,
+  prediction: string,
+): QueryInterpretation {
+  if (interpretation.intent !== "player_prop") return interpretation;
+  const hint = getPlayerSearchHint(prediction);
+  if (!hint) return interpretation;
+  return {
+    ...interpretation,
+    participant: hint.participant,
+    team_hint: hint.team,
+    sport_key: hint.sportKey,
+    confidence: Math.max(interpretation.confidence, 0.82),
+  };
+}
+
 function titleCaseName(value: string): string {
   return normalizeSearchValue(value).replace(/\b\w/g, (character) => character.toUpperCase());
 }
@@ -619,20 +640,7 @@ function inferQueryWithoutLlm(prediction: string, region: string): QueryInterpre
   const participantText = extractPlayerParticipantText(prediction);
   if (!participantText) return null;
 
-  let matchedHint: PlayerSearchHint | null = null;
-  let bestHintScore = 0;
-  let secondHintScore = 0;
-  for (const hint of PLAYER_SEARCH_HINTS) {
-    const score = Math.max(...hint.aliases.map((alias) => playerNameSimilarity(participantText, alias)));
-    if (score > bestHintScore) {
-      secondHintScore = bestHintScore;
-      bestHintScore = score;
-      matchedHint = hint;
-    } else if (score > secondHintScore) {
-      secondHintScore = score;
-    }
-  }
-  if (bestHintScore < 0.72 || bestHintScore - secondHintScore < 0.08) matchedHint = null;
+  const matchedHint = findUnambiguousPlayerHint(participantText, PLAYER_SEARCH_HINTS);
 
   const participant = matchedHint?.participant ?? titleCaseName(participantText);
   const teamHint = matchedHint?.team ?? "";
@@ -1392,7 +1400,9 @@ Deno.serve(async (req: Request) => {
     const interpretationResult = prediction && !selectedMarket
       ? await interpretQueryWithLlm(prediction, region)
       : { interpretation: null, errorCode: null } satisfies QueryInterpretationResult;
-    const interpretation = interpretationResult.interpretation ?? (prediction ? inferQueryWithoutLlm(prediction, region) : null);
+    const interpretation = interpretationResult.interpretation
+      ? applyValidatedPlayerRoutingHint(interpretationResult.interpretation, prediction)
+      : (prediction ? inferQueryWithoutLlm(prediction, region) : null);
     const text = buildInterpretedSearchText(prediction, interpretation).toLowerCase().trim();
     const cfg = REGION_BOOKMAKERS[region] ?? REGION_BOOKMAKERS.uk;
     const bookmakerQuery = (cfg.bookmakers || []).join(",");
