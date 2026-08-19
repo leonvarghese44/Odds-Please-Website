@@ -1000,6 +1000,7 @@ function parseRequestedLegs(text: string, event: OddsApiEventOdds, interpretatio
     if (textMatchesTeam(team, event.home_team)) { addLeg(`${event.home_team} ${line}`, "Spread", "spreads", point); }
     else if (textMatchesTeam(team, event.away_team)) { addLeg(`${event.away_team} ${line}`, "Spread", "spreads", point); }
   }
+  if (!interpretedPlayerLeg) {
   const scorerMatch = text.match(/(\b[A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2}\b)\s+(?:to score|score|anytime|anytime scorer|goalscorer|goal scorer)/i);
   if (scorerMatch?.[1] && (event.sport_key ?? "").startsWith("soccer")) { addLeg(scorerMatch[1], "Anytime Goalscorer", "player_goal_scorer_anytime"); }
   const firstScorerMatch = text.match(/(\b[A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2}\b)\s+(?:first goal|first scorer|first goalscorer|to score first)/i);
@@ -1032,6 +1033,7 @@ function parseRequestedLegs(text: string, event: OddsApiEventOdds, interpretatio
   if (ksMatch?.[1] && ksMatch?.[2]) { addLeg(ksMatch[1], "Pitcher Strikeouts", "pitcher_strikeouts", parseFloat(ksMatch[2]) - 0.5, "Over"); }
   const nhlGoalsMatch = text.match(/(\b[A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2}\b)\s+(?:to score|anytime goal|goal scorer|goals)/i);
   if (nhlGoalsMatch?.[1] && (event.sport_key ?? "").startsWith("icehockey")) { addLeg(nhlGoalsMatch[1], "Player Goals", "player_goals", 0.5, "Over"); }
+  }
 
   const hasDNBorDC = legs.some((l) => l.market === "Draw No Bet" || l.market === "Double Chance");
   const hasCorrectScore = legs.some((l) => l.market === "Correct Score");
