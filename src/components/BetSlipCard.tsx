@@ -350,10 +350,17 @@ function getOutcomeDisplayName(outcome: BookmakerOutcome): string {
 
 function normalizeOutcomeMatchText(value: string): string {
   return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\b(goals?|points?|yards?|rebounds?|assists?|touchdowns?|tds?|runs?|hits?|strikeouts?|saves?)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function isPlayerMarketKey(marketKey: string): boolean {
+  return marketKey.startsWith('player_') || marketKey.startsWith('batter_') || marketKey.startsWith('pitcher_');
 }
 
 function getOutcomesForMarket(marketKey: string, bookmakerOdds: BookmakerOdds[]): string[] {
@@ -364,8 +371,9 @@ function getOutcomesForMarket(marketKey: string, bookmakerOdds: BookmakerOdds[])
     if (!market) continue;
     for (const o of market.outcomes) {
       const displayName = getOutcomeDisplayName(o);
-      if (!seen.has(displayName)) {
-        seen.add(displayName);
+      const normalizedDisplayName = normalizeOutcomeMatchText(displayName);
+      if (!seen.has(normalizedDisplayName)) {
+        seen.add(normalizedDisplayName);
         outcomes.push(displayName);
       }
     }
@@ -381,7 +389,7 @@ function findOutcomePrice(
   const market = bookmaker.markets.find((m) => m.key === marketKey);
   if (!market) return null;
   let outcome = market.outcomes.find((o) => {
-    return getOutcomeDisplayName(o) === outcomeName;
+    return normalizeOutcomeMatchText(getOutcomeDisplayName(o)) === normalizeOutcomeMatchText(outcomeName);
   });
   if (!outcome) {
     outcome = market.outcomes.find((o) => o.name === outcomeName);
@@ -398,7 +406,7 @@ function resolveDeepLink(
 ): string {
   const market = bookmaker.markets.find((m) => m.key === marketKey);
   const outcome = market?.outcomes.find((o) => {
-    return getOutcomeDisplayName(o) === outcomeName || o.name === outcomeName;
+    return normalizeOutcomeMatchText(getOutcomeDisplayName(o)) === normalizeOutcomeMatchText(outcomeName) || o.name === outcomeName;
   });
   const deepestLink = outcome?.link ?? market?.link ?? bookmaker.link ?? fallbackLink;
   if (!deepestLink) return '';
@@ -494,12 +502,13 @@ export function BetSlipCard({ slip, region, language, oddsFormat, onOddsFormatCh
         );
       }
     }
-    if (!preferred) {
+    const requiresRequestedPlayerMatch = isPlayerMarketKey(activeMarket) && slip.legs[0]?.marketApiKey === activeMarket;
+    if (!preferred && !requiresRequestedPlayerMatch) {
       preferred = outcomes.find((name) =>
         bookmakerOdds.some((bm) => findOutcomePrice(bm, activeMarket, name)),
       );
     }
-    setSelectedOutcome(preferred ?? outcomes[0]);
+    setSelectedOutcome(preferred ?? (requiresRequestedPlayerMatch ? '' : outcomes[0]));
   }, [activeMarket, slip, hasBookmakerOdds, bookmakerOdds]);
 
   const brandComparison = useMemo(() => {

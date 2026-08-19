@@ -1,4 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import {
+  extractPlayerParticipantText,
+  playerNameSimilarity,
+  playerNamesReferToSameEntity,
+  resolveCanonicalPlayerSelection,
+} from "./player-resolution.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -121,11 +127,11 @@ Select sport_key from this allowlist: ${CLASSIFIABLE_SPORT_KEYS.join(", ")}.
 Core mappings: NBA=basketball_nba; NFL=americanfootball_nfl; MLB=baseball_mlb; NHL=icehockey_nhl; ATP men's tennis=${ATP_SPORT_KEY}.
 Treat "football" as association football for UK/IT context unless NFL teams, players, or American-football markets are present.
 
-For a player request, put the player's most likely full canonical name in participant and their likely current team in team_hint. A surname or familiar short name is sufficient evidence when it is unambiguous in context. Use opponent_hint only when an opponent is stated. These are search hints that will be validated against live data, so use an empty string rather than guessing when genuinely ambiguous.
+For a player request, put the player's most likely full canonical name in participant and their likely current team in team_hint. A surname or familiar short name is sufficient evidence when it is unambiguous in context. Preserve the player's identity when correcting a typo: never substitute a different player merely because they play for the same team or appear in the same fixture. Use opponent_hint only when an opponent is stated. These are search hints that will be validated against live data, so use an empty string rather than guessing when genuinely ambiguous.
 Set intent to player_prop for player statistics or scoring, team_market for a requested team/match outcome, fixture when no outcome is requested, or unknown when unclear.
 Map the requested market precisely: soccer "to score"=player_goal_scorer_anytime; first scorer=player_goal_scorer_first; shots on target=player_shots_on_target; NBA points/rebounds/assists/threes=their player_* key; NFL passing/rushing yards, receptions and touchdowns=their player_* key; MLB homer/hits/pitcher strikeouts=their batter_* or pitcher_* key; NHL to score=player_goals; match winner or moneyline=h2h; game total=totals; handicap=spreads.
 For a threshold such as "25+ points" or "250+ yards", set outcome=over and point to the sportsbook line immediately below it (24.5 and 249.5 respectively). Use point=-1 when no numeric line is requested.
-Examples: "saka to score" means Bukayo Saka, Arsenal, soccer_epl, player_goal_scorer_anytime, score, -1. "sakaa to scor" has the same interpretation. "mahomes 250+ yds" means Patrick Mahomes, Kansas City Chiefs, americanfootball_nfl, player_pass_yds, over, 249.5. "lebron 25+ points" means LeBron James, Los Angeles Lakers, basketball_nba, player_points, over, 24.5. "ohtani homer" means Shohei Ohtani, Los Angeles Dodgers, baseball_mlb, batter_home_runs, over, 0.5. Never invent an event, opponent, price, or bookmaker.`;
+Examples: "saka to score" means Bukayo Saka, Arsenal, soccer_epl, player_goal_scorer_anytime, score, -1. "sakaa to scor" has the same interpretation. "gyokores score" means Viktor Gyökeres, Arsenal, soccer_epl, player_goal_scorer_anytime, score, -1; it must never be changed to another Arsenal player. "mahomes 250+ yds" means Patrick Mahomes, Kansas City Chiefs, americanfootball_nfl, player_pass_yds, over, 249.5. "lebron 25+ points" means LeBron James, Los Angeles Lakers, basketball_nba, player_points, over, 24.5. "ohtani homer" means Shohei Ohtani, Los Angeles Dodgers, baseball_mlb, batter_home_runs, over, 0.5. Never invent an event, opponent, price, or bookmaker.`;
 
 interface OddsApiSport {
   key: string;
@@ -233,6 +239,13 @@ async function interpretQueryWithLlm(prediction: string, region: string): Promis
       point: Number.isFinite(parsed.point) ? parsed.point : -1,
       confidence: Number.isFinite(parsed.confidence) ? Math.min(1, Math.max(0, parsed.confidence)) : 0,
     };
+    if (interpretation.intent === "player_prop") {
+      const enteredParticipant = extractPlayerParticipantText(prediction);
+      if (enteredParticipant && interpretation.participant && !playerNamesReferToSameEntity(enteredParticipant, interpretation.participant)) {
+        console.warn(`QUERY INTERPRETER REJECTED PLAYER SUBSTITUTION: entered=${enteredParticipant} interpreted=${interpretation.participant}`);
+        return { interpretation: null, errorCode: "openai_player_identity_mismatch" };
+      }
+    }
     if (queryInterpretationCache.size >= 200) {
       const oldestKey = queryInterpretationCache.keys().next().value;
       if (oldestKey) queryInterpretationCache.delete(oldestKey);
@@ -550,6 +563,7 @@ interface PlayerSearchHint {
 // They never supply fixtures, markets, operators, or prices; every hint is validated against The Odds API.
 const PLAYER_SEARCH_HINTS: PlayerSearchHint[] = [
   { participant: "Bukayo Saka", aliases: ["saka", "bukayo saka"], team: "Arsenal", sportKey: "soccer_epl" },
+  { participant: "Viktor Gyökeres", aliases: ["gyokeres", "gyökeres", "viktor gyokeres", "viktor gyökeres"], team: "Arsenal", sportKey: "soccer_epl" },
   { participant: "Erling Haaland", aliases: ["haaland", "erling haaland"], team: "Manchester City", sportKey: "soccer_epl" },
   { participant: "Mohamed Salah", aliases: ["salah", "mo salah", "mohamed salah"], team: "Liverpool", sportKey: "soccer_epl" },
   { participant: "Cole Palmer", aliases: ["palmer", "cole palmer"], team: "Chelsea", sportKey: "soccer_epl" },
@@ -596,25 +610,29 @@ function inferQueryWithoutLlm(prediction: string, region: string): QueryInterpre
   else if (/\b(threes?|3 pointers?|3pt)\b/.test(normalized)) { sportKey = "basketball_nba"; marketKey = "player_threes"; outcome = "over"; }
   else if (/\b(points?|pts)\b/.test(normalized)) { sportKey = "basketball_nba"; marketKey = "player_points"; outcome = "over"; }
   else if (/\b(first goal|first scorer|score first)\b/.test(normalized)) { marketKey = "player_goal_scorer_first"; outcome = "score"; }
-  else if (/\b(to scor\w*|anytime scor\w*|goal ?scor\w*)\b/.test(normalized)) { marketKey = "player_goal_scorer_anytime"; outcome = "score"; }
+  else if (/\b((?:to\s+)?scor\w*|anytime(?:\s+goal)?|goal ?scor\w*)\b/.test(normalized)) { marketKey = "player_goal_scorer_anytime"; outcome = "score"; }
   else if (/\b(shots? on target|sot)\b/.test(normalized)) { marketKey = "player_shots_on_target"; outcome = "over"; }
   else return null;
 
   if (threshold !== null && point < 0 && outcome === "over") point = Math.max(0.5, threshold - 0.5);
 
-  const participantText = normalized
-    .replace(/^\s*(?:try|please|bet|back|pick)\s+(?:on\s+)?/, "")
-    .split(/\s+(?:\d+(?:\.\d+)?\s*(?:plus)?|to\s+scor\w*|anytime|first\s+goal|first\s+scorer|shots?\s+on\s+target|points?|pts|rebounds?|assists?|threes?|3\s*pointers?|3pt|pass(?:ing)?\s+yards?|yds?|rush(?:ing)?\s+yards?|receptions?|catches|td|touchdown|home\s+run|homer|hr|hits?|strikeouts?|ks)\b/)[0]
-    .trim();
+  const participantText = extractPlayerParticipantText(prediction);
   if (!participantText) return null;
 
   let matchedHint: PlayerSearchHint | null = null;
   let bestHintScore = 0;
+  let secondHintScore = 0;
   for (const hint of PLAYER_SEARCH_HINTS) {
-    const score = Math.max(...hint.aliases.map((alias) => Math.max(entitySimilarity(participantText, alias), entitySimilarity(alias, participantText))));
-    if (score > bestHintScore) { bestHintScore = score; matchedHint = hint; }
+    const score = Math.max(...hint.aliases.map((alias) => playerNameSimilarity(participantText, alias)));
+    if (score > bestHintScore) {
+      secondHintScore = bestHintScore;
+      bestHintScore = score;
+      matchedHint = hint;
+    } else if (score > secondHintScore) {
+      secondHintScore = score;
+    }
   }
-  if (bestHintScore < 0.78) matchedHint = null;
+  if (bestHintScore < 0.72 || bestHintScore - secondHintScore < 0.08) matchedHint = null;
 
   const participant = matchedHint?.participant ?? titleCaseName(participantText);
   const teamHint = matchedHint?.team ?? "";
@@ -868,6 +886,10 @@ const PLAYER_MARKET_LABELS: Record<string, string> = {
   player_goals: "Player Goals",
 };
 const PLAYER_MARKET_KEYS = new Set(Object.keys(PLAYER_MARKET_LABELS));
+
+function isPlayerMarketKey(marketKey: string): boolean {
+  return PLAYER_MARKET_KEYS.has(marketKey) || marketKey.startsWith("player_") || marketKey.startsWith("batter_") || marketKey.startsWith("pitcher_");
+}
 
 function getPlayerRequestedLeg(interpretation: QueryInterpretation | null): RequestedLeg | null {
   if (!interpretation || interpretation.intent !== "player_prop" || interpretation.confidence < 0.45 || !interpretation.participant || !PLAYER_MARKET_KEYS.has(interpretation.market_key)) return null;
@@ -1499,8 +1521,11 @@ Deno.serve(async (req: Request) => {
         anyOperatorHasIt = true;
         if (!bestMatch || selection.outcome.price > bestMatch.leg.odds) {
           const features = detectFeatures(requested.selection, selection.market.key, bookmaker.key);
+          const resolvedSelection = isPlayerMarketKey(selection.market.key)
+            ? resolveCanonicalPlayerSelection(selection.outcome, requested.selection)
+            : requested.selection;
           bestMatch = {
-            leg: { id: `leg-${legs.length + 1}`, selection: requested.selection, market: requested.market, marketApiKey: selection.market.key, point: requested.point, outcomeName: requested.outcomeName, odds: selection.outcome.price, result: "Pending", features },
+            leg: { id: `leg-${legs.length + 1}`, selection: resolvedSelection, market: requested.market, marketApiKey: selection.market.key, point: requested.point, outcomeName: requested.outcomeName, odds: selection.outcome.price, result: "Pending", features },
             operatorKey: bookmaker.key,
           };
         }
