@@ -1391,8 +1391,7 @@ Deno.serve(async (req: Request) => {
       }
     }
     if (!matchedEvent || !matchedSport) { return noOddsFoundResponse(); }
-    const hasInterpretedMarket = Boolean(interpretation && interpretation.intent !== "fixture" && interpretation.market_key !== "unknown");
-    const fixtureOnly = !hasInterpretedMarket && isFixtureOnlyPrompt(text, matchedEvent);
+    const fixtureOnly = isFixtureOnlyPrompt(text, matchedEvent);
     const requestedLegs = fixtureOnly || selectedMarket ? [] : parseRequestedLegs(text, matchedEvent, interpretation);
     const requestedMarketKeys = getRequestedMarketKeys(requestedLegs, selectedMarket);
     const availableEventMarketKeys = await fetchAvailableEventMarketKeys(
