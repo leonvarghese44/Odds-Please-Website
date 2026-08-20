@@ -21,7 +21,7 @@ const ACTIVE_SPORTS_TTL_MS = 10 * 60 * 1000;
 interface SportGroup { key: string; emoji: string; }
 interface OddsApiSport { key: string; active?: boolean; has_outrights?: boolean; }
 interface OddsApiEvent { id: string; sport_key: string; commence_time: string; home_team: string; away_team: string; }
-interface LivePill { label: string; text: string; emoji: string; live?: boolean; score?: string; time?: string; }
+interface LivePill { label: string; text: string; emoji: string; eventId: string; sportKey: string; live?: boolean; score?: string; time?: string; }
 
 const REGION_SPORTS: Record<string, SportGroup[]> = {
   uk: [
@@ -78,7 +78,7 @@ async function fetchUpcomingEvents(sport: SportGroup): Promise<{ sport: SportGro
     const data = await response.json().catch(() => []);
     const events: OddsApiEvent[] = Array.isArray(data) ? data : (data?.data ?? []);
     const upcoming = (Array.isArray(events) ? events : [])
-      .filter((event) => event?.home_team && event?.away_team && event?.commence_time)
+      .filter((event) => event?.id && event?.sport_key && event?.home_team && event?.away_team && event?.commence_time)
       .sort((a, b) => new Date(a.commence_time).getTime() - new Date(b.commence_time).getTime())
       .slice(0, 2);
     return { sport, events: upcoming };
@@ -111,7 +111,15 @@ Deno.serve(async (req: Request) => {
         const isLive = commence.getTime() <= Date.now();
         const time = commence.toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" });
         const label = `${event.home_team} vs ${event.away_team}`;
-        pills.push({ label, text: label, emoji: sport.emoji, live: isLive, time: isLive ? undefined : time });
+        pills.push({
+          label,
+          text: label,
+          emoji: sport.emoji,
+          eventId: event.id,
+          sportKey: event.sport_key,
+          live: isLive,
+          time: isLive ? undefined : time,
+        });
       }
       if (pills.length >= 8) break;
     }

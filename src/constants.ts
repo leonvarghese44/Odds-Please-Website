@@ -98,6 +98,7 @@ export interface LivePill {
   label: string;
   text: string;
   emoji: string;
+  eventId?: string;
   sportKey?: string;
   live?: boolean;
   score?: string;

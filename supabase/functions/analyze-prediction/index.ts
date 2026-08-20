@@ -6,6 +6,12 @@ import {
   resolveCanonicalPlayerSelection,
   shouldMatchPlayerByIdentityOnly,
 } from "./player-resolution.ts";
+import {
+  calculateEntitySimilarity,
+  looksLikeFixtureQuery,
+  normalizeSearchValue,
+  scoreFixtureTextMatch,
+} from "./fixture-resolution.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -329,16 +335,41 @@ function getRelatedPlayerSports(classified: SportMapping, text: string): SportMa
 }
 
 async function getSportsForPrediction(text: string, region: string, interpretation: QueryInterpretation | null): Promise<SportMapping[]> {
+  const hintMatches = getHintMatchedSports(text);
   const llmSportKey = interpretation?.sport_key;
   if (llmSportKey) {
     const classified = SPORT_MAP.find((sport) => sport.key === llmSportKey);
     if (classified) {
-      const sports = interpretation?.intent === "player_prop" ? getRelatedPlayerSports(classified, text) : [classified];
+      const sports = interpretation?.intent === "player_prop"
+        ? getRelatedPlayerSports(classified, text)
+        : [classified, ...hintMatches];
       return expandDynamicSports(sports);
     }
   }
-  const hintMatches = getHintMatchedSports(text);
   return expandDynamicSports(hintMatches.length > 0 ? hintMatches : getSportsForRegion(region));
+}
+
+function getSportFamily(sportKey: string): string {
+  if (sportKey.startsWith("americanfootball")) return "americanfootball";
+  if (sportKey.startsWith("icehockey")) return "icehockey";
+  if (sportKey.startsWith("basketball")) return "basketball";
+  if (sportKey.startsWith("baseball")) return "baseball";
+  if (sportKey.startsWith("tennis")) return "tennis";
+  if (sportKey.startsWith("soccer")) return "soccer";
+  return sportKey.split("_")[0];
+}
+
+async function getFallbackSearchSports(
+  region: string,
+  primarySports: SportMapping[],
+  interpretation: QueryInterpretation | null,
+): Promise<SportMapping[]> {
+  const searchedKeys = new Set(primarySports.map((sport) => sport.key));
+  const classifiedFamily = interpretation?.sport_key ? getSportFamily(interpretation.sport_key) : "";
+  const regionalSports = await expandDynamicSports(getSportsForRegion(region));
+  return regionalSports.filter((sport) =>
+    !searchedKeys.has(sport.key) && (!classifiedFamily || getSportFamily(sport.key) === classifiedFamily)
+  );
 }
 
 const TEAM_ALIASES: Record<string, string[]> = {
@@ -474,79 +505,8 @@ const TEAM_ALIASES: Record<string, string[]> = {
   "vegas golden knights": ["golden knights", "knights"],
 };
 
-const SEARCH_STOPWORDS = new Set([
-  "a", "an", "and", "at", "away", "bet", "both", "by", "draw", "first", "for", "game", "goal", "goals", "home", "in", "match", "moneyline", "of", "on", "or", "over", "player", "points", "score", "scorer", "the", "to", "under", "win", "with", "yards",
-]);
-const ENTITY_SUFFIXES = new Set(["afc", "bc", "cf", "fc", "hc", "sc"]);
-
-function normalizeSearchValue(value: string): string {
-  return (value ?? "")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function levenshteinSimilarity(left: string, right: string): number {
-  if (left === right) return 1;
-  if (!left || !right) return 0;
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
-  const current = new Array<number>(right.length + 1);
-  for (let i = 1; i <= left.length; i += 1) {
-    current[0] = i;
-    for (let j = 1; j <= right.length; j += 1) {
-      current[j] = Math.min(
-        current[j - 1] + 1,
-        previous[j] + 1,
-        previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1),
-      );
-    }
-    for (let j = 0; j <= right.length; j += 1) previous[j] = current[j];
-  }
-  return 1 - previous[right.length] / Math.max(left.length, right.length);
-}
-
-function getEntityNames(entity: string): string[] {
-  const normalizedEntity = normalizeSearchValue(entity);
-  const names = new Set<string>([normalizedEntity]);
-  for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {
-    const normalizedCanonical = normalizeSearchValue(canonical);
-    const normalizedAliases = aliases.map(normalizeSearchValue);
-    if (normalizedEntity === normalizedCanonical || normalizedAliases.includes(normalizedEntity)) {
-      names.add(normalizedCanonical);
-      normalizedAliases.forEach((alias) => names.add(alias));
-    }
-  }
-  return [...names].filter(Boolean);
-}
-
 function entitySimilarity(text: string, entity: string): number {
-  const normalizedText = normalizeSearchValue(text);
-  if (!normalizedText || !entity) return 0;
-  const queryTokens = normalizedText.split(" ").filter((token) => token.length > 1 && !SEARCH_STOPWORDS.has(token));
-  let best = 0;
-
-  for (const name of getEntityNames(entity)) {
-    if (` ${normalizedText} `.includes(` ${name} `)) return 1;
-    const entityTokens = name.split(" ").filter((token) => token.length > 1 && !ENTITY_SUFFIXES.has(token));
-    if (entityTokens.length === 0 || queryTokens.length === 0) continue;
-    const tokenScores = entityTokens.map((entityToken) => Math.max(
-      ...queryTokens.map((queryToken) => {
-        if (entityToken === queryToken) return 1;
-        if (Math.min(entityToken.length, queryToken.length) < 4) return 0;
-        return levenshteinSimilarity(entityToken, queryToken);
-      }),
-    ));
-    const strongScores = tokenScores.filter((score) => score >= 0.78);
-    const coverage = strongScores.length / entityTokens.length;
-    const average = strongScores.length > 0 ? strongScores.reduce((sum, score) => sum + score, 0) / entityTokens.length : 0;
-    const singleDistinctiveToken = entityTokens.length > 1 && strongScores.some((score) => score >= 0.88) ? 0.84 : 0;
-    best = Math.max(best, coverage >= 0.6 ? average : singleDistinctiveToken);
-  }
-  return best;
+  return calculateEntitySimilarity(text, entity, TEAM_ALIASES);
 }
 
 function namesReferToSameEntity(left: string, right: string): boolean {
@@ -1148,29 +1108,13 @@ async function fetchSportOdds(sportKey: string, region: string, bookmakers: stri
 }
 
 function buildInterpretedSearchText(prediction: string, interpretation: QueryInterpretation | null): string {
+  if (interpretation?.intent !== "player_prop") return prediction;
   const corrected = interpretation?.corrected_query?.trim();
   return corrected && normalizeSearchValue(corrected) !== normalizeSearchValue(prediction) ? `${prediction}. ${corrected}` : prediction;
 }
 
 function scoreFixtureMatch(text: string, event: OddsApiEventOdds, interpretation: QueryInterpretation | null): number {
-  if (!event?.home_team || !event?.away_team) return 0;
-  const homeScore = entitySimilarity(text, event.home_team);
-  const awayScore = entitySimilarity(text, event.away_team);
-  let score = (homeScore >= 0.82 ? homeScore * 100 : 0) + (awayScore >= 0.82 ? awayScore * 100 : 0);
-
-  if (interpretation?.team_hint) {
-    const hintScore = Math.max(entitySimilarity(interpretation.team_hint, event.home_team), entitySimilarity(interpretation.team_hint, event.away_team));
-    if (hintScore >= 0.82) score += 180 * hintScore;
-  }
-  if (interpretation?.opponent_hint) {
-    const opponentScore = Math.max(entitySimilarity(interpretation.opponent_hint, event.home_team), entitySimilarity(interpretation.opponent_hint, event.away_team));
-    if (opponentScore >= 0.82) score += 140 * opponentScore;
-  }
-  if (interpretation?.participant && event.sport_key?.startsWith("tennis")) {
-    const participantScore = Math.max(entitySimilarity(interpretation.participant, event.home_team), entitySimilarity(interpretation.participant, event.away_team));
-    if (participantScore >= 0.82) score += 180 * participantScore;
-  }
-  return score;
+  return scoreFixtureTextMatch(text, event, interpretation, TEAM_ALIASES);
 }
 
 interface CandidateResult { eventOdds: OddsApiEventOdds; sport: SportMapping; score: number; }
@@ -1351,9 +1295,9 @@ async function findPlayerEventByMarket(
   return null;
 }
 
-async function fetchSpecificEvent(eventId: string, sportKey: string, region: string, bookmakers: string): Promise<{ eventOdds: OddsApiEventOdds; sport: SportMapping } | null> {
+async function fetchSpecificEvent(eventId: string, sportKey: string): Promise<{ eventOdds: OddsApiEventOdds; sport: SportMapping } | null> {
   const sportMeta = getSportMetadata(sportKey);
-  const events = await fetchSportOdds(sportKey, region, bookmakers);
+  const events = await fetchSportEvents(sportKey);
   const found = (events ?? []).find((e) => e?.id === eventId);
   if (!found) return null;
   return { eventOdds: found, sport: sportMeta };
@@ -1411,16 +1355,23 @@ Deno.serve(async (req: Request) => {
     const cfg = REGION_BOOKMAKERS[region] ?? REGION_BOOKMAKERS.uk;
     const bookmakerQuery = (cfg.bookmakers || []).join(",");
     let matchedEvent: OddsApiEventOdds | null = null; let matchedSport: SportMapping | null = null;
-    if (selectedEventId && selectedSportKey) { const specific = await fetchSpecificEvent(selectedEventId, selectedSportKey, cfg.regions, bookmakerQuery); if (specific) { matchedEvent = specific.eventOdds; matchedSport = specific.sport; } }
+    if (selectedEventId && selectedSportKey) { const specific = await fetchSpecificEvent(selectedEventId, selectedSportKey); if (specific) { matchedEvent = specific.eventOdds; matchedSport = specific.sport; } }
     if (!matchedEvent) {
       if (!prediction) { return noOddsFoundResponse(); }
       const sportsToSearch = await getSportsForPrediction(text, region, interpretation);
       if (sportsToSearch.length === 0) { return noOddsFoundResponse(); }
       const playerSearch = interpretation?.intent === "player_prop";
-      const candidates = await fetchAndFindCandidates(text, cfg.regions, bookmakerQuery, sportsToSearch, interpretation, playerSearch);
+      const eventsOnlySearch = playerSearch || interpretation?.intent === "fixture" || looksLikeFixtureQuery(text);
+      const candidates = await fetchAndFindCandidates(text, cfg.regions, bookmakerQuery, sportsToSearch, interpretation, eventsOnlySearch);
       if (candidates.length === 0 && playerSearch) {
         const playerMarketMatch = await findPlayerEventByMarket(sportsToSearch, interpretation, cfg.regions, bookmakerQuery);
         if (playerMarketMatch) candidates.push(playerMarketMatch);
+      }
+      if (candidates.length === 0 && !playerSearch) {
+        const fallbackSports = await getFallbackSearchSports(region, sportsToSearch, interpretation);
+        if (fallbackSports.length > 0) {
+          candidates.push(...await fetchAndFindCandidates(text, cfg.regions, bookmakerQuery, fallbackSports, interpretation, true));
+        }
       }
       if (candidates.length === 0) {
         const code = interpretation ? `no_event_match_${interpretation.intent}` : interpretationResult.errorCode ?? "query_interpretation_unavailable";
