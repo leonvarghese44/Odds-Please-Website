@@ -3,8 +3,10 @@ import test from "node:test";
 
 import {
   extractPlayerParticipantText,
+  findUnambiguousPlayerHint,
   playerNamesReferToSameEntity,
   resolveCanonicalPlayerSelection,
+  shouldMatchPlayerByIdentityOnly,
 } from "../supabase/functions/analyze-prediction/player-resolution.ts";
 
 test("extracts player names from terse and misspelled scoring searches", () => {
@@ -18,6 +20,21 @@ test("accepts spelling corrections but rejects a different player", () => {
   assert.equal(playerNamesReferToSameEntity("gykores", "Viktor Gyökeres"), true);
   assert.equal(playerNamesReferToSameEntity("gyokores", "Noni Madueke"), false);
   assert.equal(playerNamesReferToSameEntity("John Smith", "Mike Smith"), false);
+});
+
+test("uses only an unambiguous player hint for routing", () => {
+  const hints = [
+    { participant: "Viktor Gyökeres", aliases: ["gyokeres", "viktor gyokeres"], team: "Arsenal" },
+    { participant: "Noni Madueke", aliases: ["madueke", "noni madueke"], team: "Arsenal" },
+  ];
+  assert.equal(findUnambiguousPlayerHint("gykores", hints)?.participant, "Viktor Gyökeres");
+  assert.equal(findUnambiguousPlayerHint("unknown player", hints), null);
+});
+
+test("matches scorer markets by player identity when the LLM says yes", () => {
+  assert.equal(shouldMatchPlayerByIdentityOnly("player_goal_scorer_anytime", "yes"), true);
+  assert.equal(shouldMatchPlayerByIdentityOnly("player_goal_scorer_anytime", "score"), true);
+  assert.equal(shouldMatchPlayerByIdentityOnly("player_points", "over"), false);
 });
 
 test("uses the API player description instead of a misspelled query", () => {

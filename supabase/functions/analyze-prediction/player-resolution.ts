@@ -3,7 +3,20 @@ interface PlayerOutcomeIdentity {
   description?: string;
 }
 
+interface PlayerIdentityHint {
+  aliases: string[];
+}
+
 const GENERIC_PLAYER_OUTCOME_NAMES = new Set(["yes", "no", "over", "under", "score"]);
+const IDENTITY_ONLY_SCORER_MARKETS = new Set([
+  "player_goal_scorer_anytime",
+  "player_goal_scorer_first",
+  "player_first_goal_scorer",
+  "player_anytime_goal",
+  "player_first_goal",
+  "player_anytime_td",
+  "player_1st_td",
+]);
 
 function normalizePlayerIdentity(value: string): string {
   return value
@@ -67,6 +80,35 @@ export function playerNameSimilarity(enteredName: string, interpretedName: strin
 
 export function playerNamesReferToSameEntity(enteredName: string, interpretedName: string): boolean {
   return playerNameSimilarity(enteredName, interpretedName) >= 0.72;
+}
+
+export function findUnambiguousPlayerHint<T extends PlayerIdentityHint>(
+  enteredName: string,
+  hints: T[],
+): T | null {
+  let bestHint: T | null = null;
+  let bestScore = 0;
+  let secondScore = 0;
+
+  for (const hint of hints) {
+    const score = Math.max(0, ...hint.aliases.map((alias) => playerNameSimilarity(enteredName, alias)));
+    if (score > bestScore) {
+      secondScore = bestScore;
+      bestScore = score;
+      bestHint = hint;
+    } else if (score > secondScore) {
+      secondScore = score;
+    }
+  }
+
+  return bestScore >= 0.72 && bestScore - secondScore >= 0.08 ? bestHint : null;
+}
+
+export function shouldMatchPlayerByIdentityOnly(
+  marketKey: string,
+  requestedOutcome: string,
+): boolean {
+  return IDENTITY_ONLY_SCORER_MARKETS.has(marketKey) && ["yes", "score"].includes(requestedOutcome.toLowerCase());
 }
 
 export function resolveCanonicalPlayerSelection(

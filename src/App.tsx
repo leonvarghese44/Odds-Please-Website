@@ -16,12 +16,14 @@ function normalizeLivePill(value: unknown): LivePill | null {
   const pill = value as Partial<LivePill>;
   if (typeof pill.label !== 'string' || typeof pill.text !== 'string') return null;
 
+  const eventId = typeof pill.eventId === 'string' ? pill.eventId : undefined;
   const sportKey = typeof pill.sportKey === 'string' ? pill.sportKey : undefined;
   const backendEmoji = typeof pill.emoji === 'string' && pill.emoji.trim() ? pill.emoji : '🏆';
   return {
     label: pill.label,
     text: pill.text,
     emoji: sportKey ? getSportEmoji(sportKey) : backendEmoji,
+    eventId,
     sportKey,
     live: pill.live,
     score: pill.score,
@@ -81,6 +83,7 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
     setLoading(true);
     setError(null);
     setSlip(null);
+    if (!fixture) setSelectedFixture(null);
 
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/analyze-prediction`, {
@@ -116,6 +119,11 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
         throw new Error('No odds found for this prediction.');
       }
 
+      if (data.source !== 'disambiguation' && data.eventId && data.sportKey) {
+        setSelectedFixture({ eventId: data.eventId, sportKey: data.sportKey });
+      } else if (data.source === 'disambiguation') {
+        setSelectedFixture(null);
+      }
       setSlip(data);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to analyze prediction';
@@ -128,7 +136,11 @@ export default function App({ region, language, oddsFormat, onOddsFormatChange }
 
   const handlePillClick = useCallback((pill: LivePill) => {
     setPrompt(pill.text);
-    analyze(pill.text);
+    const fixture = pill.eventId && pill.sportKey
+      ? { eventId: pill.eventId, sportKey: pill.sportKey }
+      : null;
+    setSelectedFixture(fixture);
+    analyze(fixture ? '' : pill.text, fixture);
   }, [analyze]);
 
   const handleSelectFixture = useCallback((candidate: CandidateFixture) => {
