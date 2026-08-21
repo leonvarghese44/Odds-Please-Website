@@ -1,5 +1,10 @@
 export type EntityAliasMap = Record<string, string[]>;
 
+export interface ExplicitTeamMarketOverride {
+  marketKey: "btts" | "correct_score";
+  outcome: "yes" | "no" | "unspecified";
+}
+
 const SEARCH_STOPWORDS = new Set([
   "a", "an", "and", "at", "away", "bet", "both", "by", "draw", "first", "for", "game", "goal", "goals", "home", "in", "match", "moneyline", "of", "on", "or", "over", "player", "points", "score", "scorer", "the", "to", "under", "win", "with", "yards", "against", "versus", "vs",
 ]);
@@ -79,6 +84,33 @@ export function calculateEntitySimilarity(text: string, entity: string, aliases:
 
 export function looksLikeFixtureQuery(text: string): boolean {
   return /\b(?:vs\.?|versus|against)\b/i.test(text);
+}
+
+function containsPlayerMarketAfterRemovingTeamPhrase(text: string): boolean {
+  return /\b(?:to score|anytime|first scorer|first goalscorer|shots? on target|points?|rebounds?|assists?|threes?|passing yards?|rushing yards?|receptions?|touchdowns?|\btd\b|home runs?|homer|pitcher strikeouts?|player goals?)\b/i.test(text);
+}
+
+export function detectExplicitTeamMarketOverride(text: string): ExplicitTeamMarketOverride | null {
+  const normalized = normalizeSearchValue(text);
+  if (!normalized) return null;
+
+  const bttsPattern = /\b(?:btts|both teams (?:not )?to score|both score|goal goal|gg)\b/g;
+  if (bttsPattern.test(normalized)) {
+    const remainder = normalized.replace(bttsPattern, " ").replace(/\s+/g, " ").trim();
+    if (!containsPlayerMarketAfterRemovingTeamPhrase(remainder)) {
+      return { marketKey: "btts", outcome: /\b(?:no|not|won t|wont)\b/.test(normalized) ? "no" : "yes" };
+    }
+  }
+
+  const correctScorePattern = /\bcorrect score\b/g;
+  if (correctScorePattern.test(normalized)) {
+    const remainder = normalized.replace(correctScorePattern, " ").replace(/\s+/g, " ").trim();
+    if (!containsPlayerMarketAfterRemovingTeamPhrase(remainder)) {
+      return { marketKey: "correct_score", outcome: "unspecified" };
+    }
+  }
+
+  return null;
 }
 
 interface FixtureIdentity {

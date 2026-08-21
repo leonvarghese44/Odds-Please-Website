@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   calculateEntitySimilarity,
   chooseFallbackTeamOutcome,
+  detectExplicitTeamMarketOverride,
   looksLikeFixtureQuery,
   scoreFixtureTextMatch,
 } from "../supabase/functions/analyze-prediction/fixture-resolution.ts";
@@ -78,6 +79,24 @@ test("keeps the home-team fallback when no player team is known", () => {
   assert.equal(
     chooseFallbackTeamOutcome(["Arsenal", "Aston Villa", "Draw"], "Aston Villa"),
     "Aston Villa",
+  );
+});
+
+test("treats both-teams-to-score wording as a team market", () => {
+  assert.deepEqual(
+    detectExplicitTeamMarketOverride("Arsenal to win and both teams to score"),
+    { marketKey: "btts", outcome: "yes" },
+  );
+  assert.deepEqual(
+    detectExplicitTeamMarketOverride("Aston Villa vs Arsenal BTTS no"),
+    { marketKey: "btts", outcome: "no" },
+  );
+});
+
+test("preserves a mixed player scorer and BTTS request", () => {
+  assert.equal(
+    detectExplicitTeamMarketOverride("Saka to score and both teams to score"),
+    null,
   );
 });
 

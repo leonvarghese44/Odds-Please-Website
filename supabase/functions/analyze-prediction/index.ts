@@ -9,6 +9,7 @@ import {
 import {
   calculateEntitySimilarity,
   chooseFallbackTeamOutcome,
+  detectExplicitTeamMarketOverride,
   looksLikeFixtureQuery,
   normalizeSearchValue,
   scoreFixtureTextMatch,
@@ -627,6 +628,23 @@ function inferQueryWithoutLlm(prediction: string, region: string): QueryInterpre
     point,
     confidence: matchedHint ? 0.76 : 0.52,
     validated_player_team_hint: Boolean(matchedHint),
+  };
+}
+
+function applyExplicitTeamMarketOverride(
+  interpretation: QueryInterpretation,
+  prediction: string,
+): QueryInterpretation {
+  const explicitMarket = detectExplicitTeamMarketOverride(prediction);
+  if (!explicitMarket) return interpretation;
+  return {
+    ...interpretation,
+    intent: "team_market",
+    participant: "",
+    market_key: explicitMarket.marketKey,
+    outcome: explicitMarket.outcome,
+    point: -1,
+    validated_player_team_hint: false,
   };
 }
 
@@ -1353,7 +1371,7 @@ Deno.serve(async (req: Request) => {
       ? await interpretQueryWithLlm(prediction, region)
       : { interpretation: null, errorCode: null } satisfies QueryInterpretationResult;
     const interpretation = interpretationResult.interpretation
-      ? applyValidatedPlayerRoutingHint(interpretationResult.interpretation, prediction)
+      ? applyValidatedPlayerRoutingHint(applyExplicitTeamMarketOverride(interpretationResult.interpretation, prediction), prediction)
       : (prediction ? inferQueryWithoutLlm(prediction, region) : null);
     const text = buildInterpretedSearchText(prediction, interpretation).toLowerCase().trim();
     const cfg = REGION_BOOKMAKERS[region] ?? REGION_BOOKMAKERS.uk;
