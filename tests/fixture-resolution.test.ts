@@ -44,6 +44,28 @@ test("rejects LLM team hints that are unsupported by the original query", () => 
   assert.equal(score, 0);
 });
 
+test("routes a known player to a fixture using an explicitly validated team hint", () => {
+  const score = scoreFixtureTextMatch(
+    "saka to score",
+    { home_team: "Aston Villa", away_team: "Arsenal", sport_key: "soccer_epl" },
+    {
+      participant: "Bukayo Saka",
+      team_hint: "Arsenal",
+      validated_player_team_hint: true,
+    },
+  );
+  assert.equal(score, 180);
+});
+
+test("does not route a player query from an unvalidated team hint", () => {
+  const score = scoreFixtureTextMatch(
+    "saka to score",
+    { home_team: "Aston Villa", away_team: "Arsenal", sport_key: "soccer_epl" },
+    { participant: "Bukayo Saka", team_hint: "Arsenal" },
+  );
+  assert.equal(score, 0);
+});
+
 test("recognizes explicit fixture syntax", () => {
   assert.equal(looksLikeFixtureQuery("Arsenal vs Coventry City"), true);
   assert.equal(looksLikeFixtureQuery("Arsenal against Coventry City"), true);

@@ -91,6 +91,7 @@ interface FixtureInterpretationHints {
   team_hint?: string;
   opponent_hint?: string;
   participant?: string;
+  validated_player_team_hint?: boolean;
 }
 
 export function scoreFixtureTextMatch(
@@ -105,13 +106,13 @@ export function scoreFixtureTextMatch(
   const awayScore = similarity(text, event.away_team);
   let score = (homeScore >= 0.82 ? homeScore * 100 : 0) + (awayScore >= 0.82 ? awayScore * 100 : 0);
 
-  const addValidatedHint = (hint: string | undefined, weight: number) => {
-    if (!hint || similarity(text, hint) < 0.78) return;
+  const addValidatedHint = (hint: string | undefined, weight: number, alreadyValidated = false) => {
+    if (!hint || (!alreadyValidated && similarity(text, hint) < 0.78)) return;
     const hintScore = Math.max(similarity(hint, event.home_team), similarity(hint, event.away_team));
     if (hintScore >= 0.82) score += weight * hintScore;
   };
 
-  addValidatedHint(interpretation?.team_hint, 180);
+  addValidatedHint(interpretation?.team_hint, 180, interpretation?.validated_player_team_hint === true);
   addValidatedHint(interpretation?.opponent_hint, 140);
   if (interpretation?.participant && event.sport_key?.startsWith("tennis")) {
     addValidatedHint(interpretation.participant, 180);

@@ -121,6 +121,7 @@ interface QueryInterpretation {
   outcome: QueryOutcome;
   point: number;
   confidence: number;
+  validated_player_team_hint?: boolean;
 }
 
 interface QueryInterpretationResult {
@@ -561,6 +562,7 @@ function applyValidatedPlayerRoutingHint(
     team_hint: hint.team,
     sport_key: hint.sportKey,
     confidence: Math.max(interpretation.confidence, 0.82),
+    validated_player_team_hint: true,
   };
 }
 
@@ -623,6 +625,7 @@ function inferQueryWithoutLlm(prediction: string, region: string): QueryInterpre
     outcome,
     point,
     confidence: matchedHint ? 0.76 : 0.52,
+    validated_player_team_hint: Boolean(matchedHint),
   };
 }
 
