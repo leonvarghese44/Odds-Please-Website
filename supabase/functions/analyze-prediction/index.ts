@@ -1370,8 +1370,13 @@ Deno.serve(async (req: Request) => {
     const interpretationResult = prediction && !selectedMarket
       ? await interpretQueryWithLlm(prediction, region)
       : { interpretation: null, errorCode: null } satisfies QueryInterpretationResult;
-    const baseInterpretation = interpretationResult.interpretation
-      ?? (prediction ? inferQueryWithoutLlm(prediction, region) : null);
+    const inferredInterpretation = prediction ? inferQueryWithoutLlm(prediction, region) : null;
+    const validatedKnownPlayerInterpretation = prediction && getPlayerSearchHint(prediction)
+      ? inferredInterpretation
+      : null;
+    const baseInterpretation = validatedKnownPlayerInterpretation
+      ?? interpretationResult.interpretation
+      ?? inferredInterpretation;
     const interpretation = baseInterpretation
       ? applyValidatedPlayerRoutingHint(applyExplicitTeamMarketOverride(baseInterpretation, prediction), prediction)
       : null;
