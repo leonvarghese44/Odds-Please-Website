@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   calculateEntitySimilarity,
+  chooseFallbackTeamOutcome,
   looksLikeFixtureQuery,
   scoreFixtureTextMatch,
 } from "../supabase/functions/analyze-prediction/fixture-resolution.ts";
@@ -64,6 +65,20 @@ test("does not route a player query from an unvalidated team hint", () => {
     { participant: "Bukayo Saka", team_hint: "Arsenal" },
   );
   assert.equal(score, 0);
+});
+
+test("defaults an unavailable player prop to the validated player's team", () => {
+  assert.equal(
+    chooseFallbackTeamOutcome(["Arsenal", "Aston Villa", "Draw"], "Aston Villa", "Arsenal"),
+    "Arsenal",
+  );
+});
+
+test("keeps the home-team fallback when no player team is known", () => {
+  assert.equal(
+    chooseFallbackTeamOutcome(["Arsenal", "Aston Villa", "Draw"], "Aston Villa"),
+    "Aston Villa",
+  );
 });
 
 test("recognizes explicit fixture syntax", () => {

@@ -119,3 +119,20 @@ export function scoreFixtureTextMatch(
   }
   return score;
 }
+
+export function chooseFallbackTeamOutcome(
+  outcomeNames: string[],
+  homeTeam: string,
+  preferredTeamHint = "",
+  aliases: EntityAliasMap = {},
+): string | null {
+  if (outcomeNames.length === 0) return null;
+  if (preferredTeamHint) {
+    const preferred = outcomeNames.find((name) =>
+      calculateEntitySimilarity(preferredTeamHint, name, aliases) >= 0.82
+    );
+    if (preferred) return preferred;
+  }
+  return outcomeNames.find((name) => normalizeSearchValue(name) === normalizeSearchValue(homeTeam))
+    ?? outcomeNames[0];
+}
