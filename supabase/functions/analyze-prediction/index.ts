@@ -982,7 +982,7 @@ function parseRequestedLegs(text: string, event: OddsApiEventOdds, interpretatio
     if (textMatchesTeam(team, event.home_team)) { addLeg(`${event.home_team} ${line}`, "Spread", "spreads", point); }
     else if (textMatchesTeam(team, event.away_team)) { addLeg(`${event.away_team} ${line}`, "Spread", "spreads", point); }
   }
-  if (!interpretedPlayerLeg) {
+  if (!interpretedPlayerLeg && !detectExplicitTeamMarketOverride(text)) {
   const scorerMatch = text.match(/(\b[A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2}\b)\s+(?:to score|score|anytime|anytime scorer|goalscorer|goal scorer)/i);
   if (scorerMatch?.[1] && (event.sport_key ?? "").startsWith("soccer")) { addLeg(scorerMatch[1], "Anytime Goalscorer", "player_goal_scorer_anytime"); }
   const firstScorerMatch = text.match(/(\b[A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2}\b)\s+(?:first goal|first scorer|first goalscorer|to score first)/i);
@@ -1370,9 +1370,11 @@ Deno.serve(async (req: Request) => {
     const interpretationResult = prediction && !selectedMarket
       ? await interpretQueryWithLlm(prediction, region)
       : { interpretation: null, errorCode: null } satisfies QueryInterpretationResult;
-    const interpretation = interpretationResult.interpretation
-      ? applyValidatedPlayerRoutingHint(applyExplicitTeamMarketOverride(interpretationResult.interpretation, prediction), prediction)
-      : (prediction ? inferQueryWithoutLlm(prediction, region) : null);
+    const baseInterpretation = interpretationResult.interpretation
+      ?? (prediction ? inferQueryWithoutLlm(prediction, region) : null);
+    const interpretation = baseInterpretation
+      ? applyValidatedPlayerRoutingHint(applyExplicitTeamMarketOverride(baseInterpretation, prediction), prediction)
+      : null;
     const text = buildInterpretedSearchText(prediction, interpretation).toLowerCase().trim();
     const cfg = REGION_BOOKMAKERS[region] ?? REGION_BOOKMAKERS.uk;
     const bookmakerQuery = (cfg.bookmakers || []).join(",");
