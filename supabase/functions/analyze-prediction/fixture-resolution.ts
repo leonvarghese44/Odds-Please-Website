@@ -1,5 +1,10 @@
 export type EntityAliasMap = Record<string, string[]>;
 
+export interface ExplicitTeamMarketOverride {
+  marketKey: "btts" | "correct_score";
+  outcome: "yes" | "no" | "unspecified";
+}
+
 const SEARCH_STOPWORDS = new Set([
   "a", "an", "and", "at", "away", "bet", "both", "by", "draw", "first", "for", "game", "goal", "goals", "home", "in", "match", "moneyline", "of", "on", "or", "over", "player", "points", "score", "scorer", "the", "to", "under", "win", "with", "yards", "against", "versus", "vs",
 ]);
@@ -81,6 +86,33 @@ export function looksLikeFixtureQuery(text: string): boolean {
   return /\b(?:vs\.?|versus|against)\b/i.test(text);
 }
 
+function containsPlayerMarketAfterRemovingTeamPhrase(text: string): boolean {
+  return /\b(?:to score|anytime|first scorer|first goalscorer|shots? on target|points?|rebounds?|assists?|threes?|passing yards?|rushing yards?|receptions?|touchdowns?|\btd\b|home runs?|homer|pitcher strikeouts?|player goals?)\b/i.test(text);
+}
+
+export function detectExplicitTeamMarketOverride(text: string): ExplicitTeamMarketOverride | null {
+  const normalized = normalizeSearchValue(text);
+  if (!normalized) return null;
+
+  const bttsPattern = /\b(?:btts|both teams (?:not )?to score|both score|goal goal|gg)\b/g;
+  if (bttsPattern.test(normalized)) {
+    const remainder = normalized.replace(bttsPattern, " ").replace(/\s+/g, " ").trim();
+    if (!containsPlayerMarketAfterRemovingTeamPhrase(remainder)) {
+      return { marketKey: "btts", outcome: /\b(?:no|not|won t|wont)\b/.test(normalized) ? "no" : "yes" };
+    }
+  }
+
+  const correctScorePattern = /\bcorrect score\b/g;
+  if (correctScorePattern.test(normalized)) {
+    const remainder = normalized.replace(correctScorePattern, " ").replace(/\s+/g, " ").trim();
+    if (!containsPlayerMarketAfterRemovingTeamPhrase(remainder)) {
+      return { marketKey: "correct_score", outcome: "unspecified" };
+    }
+  }
+
+  return null;
+}
+
 interface FixtureIdentity {
   home_team: string;
   away_team: string;
@@ -91,6 +123,7 @@ interface FixtureInterpretationHints {
   team_hint?: string;
   opponent_hint?: string;
   participant?: string;
+  validated_player_team_hint?: boolean;
 }
 
 export function scoreFixtureTextMatch(
@@ -105,16 +138,33 @@ export function scoreFixtureTextMatch(
   const awayScore = similarity(text, event.away_team);
   let score = (homeScore >= 0.82 ? homeScore * 100 : 0) + (awayScore >= 0.82 ? awayScore * 100 : 0);
 
-  const addValidatedHint = (hint: string | undefined, weight: number) => {
-    if (!hint || similarity(text, hint) < 0.78) return;
+  const addValidatedHint = (hint: string | undefined, weight: number, alreadyValidated = false) => {
+    if (!hint || (!alreadyValidated && similarity(text, hint) < 0.78)) return;
     const hintScore = Math.max(similarity(hint, event.home_team), similarity(hint, event.away_team));
     if (hintScore >= 0.82) score += weight * hintScore;
   };
 
-  addValidatedHint(interpretation?.team_hint, 180);
+  addValidatedHint(interpretation?.team_hint, 180, interpretation?.validated_player_team_hint === true);
   addValidatedHint(interpretation?.opponent_hint, 140);
   if (interpretation?.participant && event.sport_key?.startsWith("tennis")) {
     addValidatedHint(interpretation.participant, 180);
   }
   return score;
+}
+
+export function chooseFallbackTeamOutcome(
+  outcomeNames: string[],
+  homeTeam: string,
+  preferredTeamHint = "",
+  aliases: EntityAliasMap = {},
+): string | null {
+  if (outcomeNames.length === 0) return null;
+  if (preferredTeamHint) {
+    const preferred = outcomeNames.find((name) =>
+      calculateEntitySimilarity(preferredTeamHint, name, aliases) >= 0.82
+    );
+    if (preferred) return preferred;
+  }
+  return outcomeNames.find((name) => normalizeSearchValue(name) === normalizeSearchValue(homeTeam))
+    ?? outcomeNames[0];
 }

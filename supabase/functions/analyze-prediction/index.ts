@@ -8,6 +8,8 @@ import {
 } from "./player-resolution.ts";
 import {
   calculateEntitySimilarity,
+  chooseFallbackTeamOutcome,
+  detectExplicitTeamMarketOverride,
   looksLikeFixtureQuery,
   normalizeSearchValue,
   scoreFixtureTextMatch,
@@ -121,6 +123,7 @@ interface QueryInterpretation {
   outcome: QueryOutcome;
   point: number;
   confidence: number;
+  validated_player_team_hint?: boolean;
 }
 
 interface QueryInterpretationResult {
@@ -561,6 +564,7 @@ function applyValidatedPlayerRoutingHint(
     team_hint: hint.team,
     sport_key: hint.sportKey,
     confidence: Math.max(interpretation.confidence, 0.82),
+    validated_player_team_hint: true,
   };
 }
 
@@ -623,6 +627,24 @@ function inferQueryWithoutLlm(prediction: string, region: string): QueryInterpre
     outcome,
     point,
     confidence: matchedHint ? 0.76 : 0.52,
+    validated_player_team_hint: Boolean(matchedHint),
+  };
+}
+
+function applyExplicitTeamMarketOverride(
+  interpretation: QueryInterpretation,
+  prediction: string,
+): QueryInterpretation {
+  const explicitMarket = detectExplicitTeamMarketOverride(prediction);
+  if (!explicitMarket) return interpretation;
+  return {
+    ...interpretation,
+    intent: "team_market",
+    participant: "",
+    market_key: explicitMarket.marketKey,
+    outcome: explicitMarket.outcome,
+    point: -1,
+    validated_player_team_hint: false,
   };
 }
 
@@ -960,7 +982,7 @@ function parseRequestedLegs(text: string, event: OddsApiEventOdds, interpretatio
     if (textMatchesTeam(team, event.home_team)) { addLeg(`${event.home_team} ${line}`, "Spread", "spreads", point); }
     else if (textMatchesTeam(team, event.away_team)) { addLeg(`${event.away_team} ${line}`, "Spread", "spreads", point); }
   }
-  if (!interpretedPlayerLeg) {
+  if (!interpretedPlayerLeg && !detectExplicitTeamMarketOverride(text)) {
   const scorerMatch = text.match(/(\b[A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2}\b)\s+(?:to score|score|anytime|anytime scorer|goalscorer|goal scorer)/i);
   if (scorerMatch?.[1] && (event.sport_key ?? "").startsWith("soccer")) { addLeg(scorerMatch[1], "Anytime Goalscorer", "player_goal_scorer_anytime"); }
   const firstScorerMatch = text.match(/(\b[A-Z][a-z'-]+(?:\s+[A-Z][a-z'-]+){0,2}\b)\s+(?:first goal|first scorer|first goalscorer|to score first)/i);
@@ -1348,9 +1370,16 @@ Deno.serve(async (req: Request) => {
     const interpretationResult = prediction && !selectedMarket
       ? await interpretQueryWithLlm(prediction, region)
       : { interpretation: null, errorCode: null } satisfies QueryInterpretationResult;
-    const interpretation = interpretationResult.interpretation
-      ? applyValidatedPlayerRoutingHint(interpretationResult.interpretation, prediction)
-      : (prediction ? inferQueryWithoutLlm(prediction, region) : null);
+    const inferredInterpretation = prediction ? inferQueryWithoutLlm(prediction, region) : null;
+    const validatedKnownPlayerInterpretation = prediction && getPlayerSearchHint(prediction)
+      ? inferredInterpretation
+      : null;
+    const baseInterpretation = validatedKnownPlayerInterpretation
+      ?? interpretationResult.interpretation
+      ?? inferredInterpretation;
+    const interpretation = baseInterpretation
+      ? applyValidatedPlayerRoutingHint(applyExplicitTeamMarketOverride(baseInterpretation, prediction), prediction)
+      : null;
     const text = buildInterpretedSearchText(prediction, interpretation).toLowerCase().trim();
     const cfg = REGION_BOOKMAKERS[region] ?? REGION_BOOKMAKERS.uk;
     const bookmakerQuery = (cfg.bookmakers || []).join(",");
@@ -1442,7 +1471,7 @@ Deno.serve(async (req: Request) => {
         for (const bookmaker of matchedEvent.bookmakers ?? []) { for (const market of bookmaker?.markets ?? []) { if (market.key === selectedMarket) { for (const outcome of market?.outcomes ?? []) { if (outcome?.price && outcome.price > 0) { defaultLeg = { id: "leg-1", selection: outcome.name, market: market.key === "h2h" ? "Match Result (1X2)" : market.key === "btts" ? "BTTS" : market.key === "totals" ? "Over/Under Total Goals" : market.key, marketApiKey: market.key, odds: outcome.price, result: "Pending", features: detectFeatures(outcome.name, market.key, bookmaker.key) }; break; } } if (defaultLeg) break; } } if (defaultLeg) break; }
       }
       if (selectedMarket && !defaultLeg) { return noOddsFoundResponse(); }
-      if (!selectedMarket && !defaultLeg) { const h2hBookmaker = (matchedEvent.bookmakers ?? []).find((b) => (b?.markets ?? []).some((m) => m?.key === "h2h")); if (h2hBookmaker) { const h2h = (h2hBookmaker.markets ?? []).find((m) => m?.key === "h2h"); if (h2h && (h2h.outcomes ?? []).length > 0) { const homeOutcome = (h2h.outcomes ?? []).find((o) => o?.name === matchedEvent.home_team) ?? h2h.outcomes[0]; if (homeOutcome?.price && homeOutcome.price > 0) { defaultLeg = { id: "leg-1", selection: homeOutcome.name, market: "Match Result (1X2)", marketApiKey: "h2h", odds: homeOutcome.price, result: "Pending", features: detectFeatures(homeOutcome.name, "h2h", h2hBookmaker.key) }; } } } }
+      if (!selectedMarket && !defaultLeg) { const h2hBookmaker = (matchedEvent.bookmakers ?? []).find((b) => (b?.markets ?? []).some((m) => m?.key === "h2h")); if (h2hBookmaker) { const h2h = (h2hBookmaker.markets ?? []).find((m) => m?.key === "h2h"); if (h2h && (h2h.outcomes ?? []).length > 0) { const fallbackName = chooseFallbackTeamOutcome((h2h.outcomes ?? []).map((outcome) => outcome.name), matchedEvent.home_team, showPlayerMarketFallback ? interpretation?.team_hint : "", TEAM_ALIASES); const fallbackOutcome = (h2h.outcomes ?? []).find((outcome) => outcome.name === fallbackName) ?? h2h.outcomes[0]; if (fallbackOutcome?.price && fallbackOutcome.price > 0) { defaultLeg = { id: "leg-1", selection: fallbackOutcome.name, market: "Match Result (1X2)", marketApiKey: "h2h", odds: fallbackOutcome.price, result: "Pending", features: detectFeatures(fallbackOutcome.name, "h2h", h2hBookmaker.key) }; } } } }
       if (!selectedMarket && !defaultLeg) { for (const bookmaker of matchedEvent.bookmakers ?? []) { for (const market of bookmaker?.markets ?? []) { for (const outcome of market?.outcomes ?? []) { if (outcome?.price && outcome.price > 0) { defaultLeg = { id: "leg-1", selection: outcome.name, market: market.key === "h2h" ? "Match Result (1X2)" : market.key, marketApiKey: market.key, odds: outcome.price, result: "Pending", features: detectFeatures(outcome.name, market.key, bookmaker.key) }; break; } } if (defaultLeg) break; } if (defaultLeg) break; } }
       const legs = defaultLeg ? [defaultLeg] : [];
       if (legs.length === 0) { return noOddsFoundResponse(); }

@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   calculateEntitySimilarity,
+  chooseFallbackTeamOutcome,
+  detectExplicitTeamMarketOverride,
   looksLikeFixtureQuery,
   scoreFixtureTextMatch,
 } from "../supabase/functions/analyze-prediction/fixture-resolution.ts";
@@ -42,6 +44,60 @@ test("rejects LLM team hints that are unsupported by the original query", () => 
     { team_hint: "Leicester City", opponent_hint: "Burton Albion" },
   );
   assert.equal(score, 0);
+});
+
+test("routes a known player to a fixture using an explicitly validated team hint", () => {
+  const score = scoreFixtureTextMatch(
+    "saka to score",
+    { home_team: "Aston Villa", away_team: "Arsenal", sport_key: "soccer_epl" },
+    {
+      participant: "Bukayo Saka",
+      team_hint: "Arsenal",
+      validated_player_team_hint: true,
+    },
+  );
+  assert.equal(score, 180);
+});
+
+test("does not route a player query from an unvalidated team hint", () => {
+  const score = scoreFixtureTextMatch(
+    "saka to score",
+    { home_team: "Aston Villa", away_team: "Arsenal", sport_key: "soccer_epl" },
+    { participant: "Bukayo Saka", team_hint: "Arsenal" },
+  );
+  assert.equal(score, 0);
+});
+
+test("defaults an unavailable player prop to the validated player's team", () => {
+  assert.equal(
+    chooseFallbackTeamOutcome(["Arsenal", "Aston Villa", "Draw"], "Aston Villa", "Arsenal"),
+    "Arsenal",
+  );
+});
+
+test("keeps the home-team fallback when no player team is known", () => {
+  assert.equal(
+    chooseFallbackTeamOutcome(["Arsenal", "Aston Villa", "Draw"], "Aston Villa"),
+    "Aston Villa",
+  );
+});
+
+test("treats both-teams-to-score wording as a team market", () => {
+  assert.deepEqual(
+    detectExplicitTeamMarketOverride("Arsenal to win and both teams to score"),
+    { marketKey: "btts", outcome: "yes" },
+  );
+  assert.deepEqual(
+    detectExplicitTeamMarketOverride("Aston Villa vs Arsenal BTTS no"),
+    { marketKey: "btts", outcome: "no" },
+  );
+});
+
+test("preserves a mixed player scorer and BTTS request", () => {
+  assert.equal(
+    detectExplicitTeamMarketOverride("Saka to score and both teams to score"),
+    null,
+  );
 });
 
 test("recognizes explicit fixture syntax", () => {
